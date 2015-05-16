@@ -11,5 +11,11 @@
 
     <artifactId>client</artifactId>
 
-
+    <dependencies>
+        <dependency>
+            <groupId>com.khovanskiy</groupId>
+            <artifactId>common</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+    </dependencies>
 </project>
