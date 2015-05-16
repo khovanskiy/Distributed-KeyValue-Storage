@@ -7,8 +7,13 @@
     <groupId>com.khovanskiy</groupId>
     <artifactId>distributed-keyvalue-storage</artifactId>
     <version>1.0.0</version>
+    <modules>
+        <module>common</module>
+        <module>client</module>
+        <module>server</module>
+    </modules>
 
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
 
     <dependencies>
         <dependency>
