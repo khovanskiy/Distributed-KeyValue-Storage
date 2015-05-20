@@ -1,6 +1,7 @@
 package com.khovanskiy.dkvstorage.server;
 
-import com.khovanskiy.dkvstorage.vr.Node;
+import com.khovanskiy.dkvstorage.vr.Connection;
+import com.khovanskiy.dkvstorage.vr.Replica;
 import com.khovanskiy.dkvstorage.vr.ServerNode;
 
 import java.io.BufferedReader;
@@ -16,21 +17,21 @@ public class ServerMain {
     private static final String DEFAULT_CONFIG_FILENAME = "dkvs.properties";
     private static final int DEFAULT_TIMEOUT = 1000;
 
-    private ServerNode current;
+    private Replica current;
     private int timeout = DEFAULT_TIMEOUT;
-    private List<Node> nodes = new ArrayList<>();
 
     public static void main(String[] args) throws IOException {
         new ServerMain().execute(args);
     }
 
     public void execute(String[] args) throws IOException {
-        int nodeId;
+        int replicaNumber;
         if (args.length >= 2 && args[0].equals("dkvs_node")) {
-            nodeId = Integer.parseInt(args[1]);
+            replicaNumber = Integer.parseInt(args[1]);
         } else {
             return;
         }
+        List<Replica> configuration = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new FileReader(DEFAULT_CONFIG_FILENAME))) {
             while (reader.ready()) {
                 String[] line = reader.readLine().split("=");
@@ -43,25 +44,20 @@ public class ServerMain {
                     String host = right[0];
                     int port = Integer.parseInt(right[1]);
 
-                    if (id == nodeId) {
-                        current = new ServerNode(id, host, port);
-                        current.setId(id);
-                    } else {
-                        Node node = new Node(host, port);
-                        node.setId(id);
-                        nodes.add(node);
+                    Replica replica = new Replica(id, host, port);
+                    if (id == replicaNumber) {
+                        current = replica;
                     }
-
+                    configuration.add(replica);
                 }
             }
         }
-        System.out.println("Other nodes:");
-        for (Node node : nodes) {
-            System.out.println(node);
-        }
-        System.out.println("Current node: " + current);
-        current.start(nodes);
 
-        current.broadcast("node " + current.getId());
+        System.out.println("Current node: " + current);
+        System.out.println("Other nodes:");
+        for (Replica replica : configuration) {
+            System.out.println(replica);
+        }
+        current.start(configuration);
     }
 }

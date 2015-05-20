@@ -1,5 +1,6 @@
 package com.khovanskiy.dkvstorage.vr;
 
+import com.khovanskiy.dkvstorage.vr.message.MessageReply;
 import com.khovanskiy.dkvstorage.vr.message.MessageRequest;
 
 /**
@@ -7,6 +8,19 @@ import com.khovanskiy.dkvstorage.vr.message.MessageRequest;
  */
 public class ClientEntry {
     private MessageRequest request;
+    private MessageReply reply;
+
+    public ClientEntry(MessageRequest request) {
+        this.request = request;
+    }
+
+    public MessageReply getReply() {
+        return reply;
+    }
+
+    public void setReply(MessageReply reply) {
+        this.reply = reply;
+    }
 
     public boolean hasExecuted() {
         return false;

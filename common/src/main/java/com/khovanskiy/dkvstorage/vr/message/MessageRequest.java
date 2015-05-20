@@ -1,6 +1,8 @@
 package com.khovanskiy.dkvstorage.vr.message;
 
-import com.khovanskiy.dkvstorage.vr.Operation;
+import com.khovanskiy.dkvstorage.vr.operation.Operation;
+import com.khovanskiy.dkvstorage.vr.Replica;
+import org.json.simple.JSONObject;
 
 /**
  * @author Victor Khovanskiy
@@ -26,5 +28,15 @@ public class MessageRequest extends Message {
 
     public int getRequestNumber() {
         return requestNumber;
+    }
+
+    @Override
+    public void delegateProcessing(Replica replica) {
+        replica.onReceivedRequest(this);
+    }
+
+    @Override
+    public String toString() {
+        return operation + " " + clientId + " " + requestNumber;
     }
 }
