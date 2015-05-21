@@ -1,19 +1,19 @@
 package com.khovanskiy.dkvstorage.vr;
 
-import com.khovanskiy.dkvstorage.vr.message.MessageRequest;
+import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
 
 /**
  * @author Victor Khovanskiy
  */
 public class LogEntry {
 
-    public MessageRequest getRequest() {
+    public RequestMessage getRequest() {
         return request;
     }
 
-    private MessageRequest request;
+    private RequestMessage request;
 
-    public LogEntry(MessageRequest request) {
+    public LogEntry(RequestMessage request) {
         this.request = request;
     }
 }

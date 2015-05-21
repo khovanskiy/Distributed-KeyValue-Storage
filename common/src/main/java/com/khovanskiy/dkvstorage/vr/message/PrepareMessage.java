@@ -5,20 +5,20 @@ import com.khovanskiy.dkvstorage.vr.Replica;
 /**
  * @author Victor Khovanskiy
  */
-public class MessagePrepare extends Message {
+public class PrepareMessage extends Message {
     private int viewNumber;
-    private MessageRequest request;
+    private RequestMessage request;
     private int opNumber;
     private int commitNumber;
 
-    public MessagePrepare(int viewNumber, MessageRequest message, int opNumber, int commitNumber) {
+    public PrepareMessage(int viewNumber, RequestMessage message, int opNumber, int commitNumber) {
         this.viewNumber = viewNumber;
         this.request = message;
         this.opNumber = opNumber;
         this.commitNumber = commitNumber;
     }
 
-    public MessageRequest getRequest() {
+    public RequestMessage getRequest() {
         return request;
     }
 

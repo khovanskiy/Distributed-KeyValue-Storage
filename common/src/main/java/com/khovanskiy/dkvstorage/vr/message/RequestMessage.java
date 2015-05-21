@@ -7,12 +7,12 @@ import org.json.simple.JSONObject;
 /**
  * @author Victor Khovanskiy
  */
-public class MessageRequest extends Message {
+public class RequestMessage extends Message {
     private Operation operation;
     private int clientId;
     private int requestNumber;
 
-    public MessageRequest(Operation operation, int clientId, int requestNumber) {
+    public RequestMessage(Operation operation, int clientId, int requestNumber) {
         this.operation = operation;
         this.clientId = clientId;
         this.requestNumber = requestNumber;

@@ -13,26 +13,26 @@ import java.util.concurrent.Executors;
 
 public class ServerNode {
 
-    private final Map<Integer, Connection> nodes = new HashMap<>();
-    private final List<Connection> unknowns = new ArrayList<>();
-    private final Map<Integer, Connection> clients = new HashMap<>();
+    private final Map<Integer, SocketConnection> nodes = new HashMap<>();
+    private final List<SocketConnection> unknowns = new ArrayList<>();
+    private final Map<Integer, SocketConnection> clients = new HashMap<>();
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
     private ServerSocket serverSocket;
 
-    private final Connection.ConnectionListener connectionListener = new Connection.ConnectionListener() {
+    private final SocketConnection.ConnectionListener connectionListener = new SocketConnection.ConnectionListener() {
 
         @Override
-        public void onConnected(Connection node) {
+        public void onConnected(SocketConnection node) {
             System.out.println("Connected [" + node + "]");
         }
 
         @Override
-        public void onDisconnected(Connection node, @Nullable IOException e) {
+        public void onDisconnected(SocketConnection node, @Nullable IOException e) {
             System.out.println("Disconnected [" + node + "]");
         }
 
         @Override
-        public void onReceived(Connection node, @NotNull String line) {
+        public void onReceived(SocketConnection node, @NotNull String line) {
             System.out.println("Receive line from [" + node + "]: " + line);
         }
     };
@@ -54,20 +54,20 @@ public class ServerNode {
         serverSocket = new ServerSocket(port);
     }
 
-    public void start(Collection<Connection> nodes) {
-        for (Connection node : nodes) {
+    public void start(Collection<SocketConnection> nodes) {
+        for (SocketConnection node : nodes) {
             node.setKeepConnection(true);
             node.setConnectionListener(connectionListener);
             //this.nodes.put(node.getId(), node);
         }
-        for (Connection node : nodes) {
+        for (SocketConnection node : nodes) {
             node.start();
         }
         backgroundExecutor.execute(runnableAccepter);
     }
 
     public synchronized void broadcast(String m) {
-        for (Map.Entry<Integer, Connection> entry : nodes.entrySet()) {
+        for (Map.Entry<Integer, SocketConnection> entry : nodes.entrySet()) {
             /*if (entry.getKey() != getId()) {
                 entry.getValue().send(m);
             }*/
@@ -75,7 +75,7 @@ public class ServerNode {
     }
 
     protected synchronized void onAccept(@NotNull Socket socket) {
-        Connection node = new Connection(socket);
+        SocketConnection node = new SocketConnection(socket);
         unknowns.add(node);
         node.setConnectionListener(connectionListener);
         node.start();

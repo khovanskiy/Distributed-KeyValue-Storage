@@ -57,12 +57,12 @@ public class MessageHandler {
         return null;
     }
 
-    private MessagePrepare parsePrepareMessage() throws ParseException {
+    private PrepareMessage parsePrepareMessage() throws ParseException {
         int viewNumber = nextInt();
-        MessageRequest request = parseRequestMessage();
+        RequestMessage request = parseRequestMessage();
         int opNumber = nextInt();
         int commitNumber = nextInt();
-        return new MessagePrepare(viewNumber, request, opNumber, commitNumber);
+        return new PrepareMessage(viewNumber, request, opNumber, commitNumber);
     }
 
     private Message parseIdentificationMessage() {
@@ -70,11 +70,11 @@ public class MessageHandler {
         return new IdentificationMessage(id);
     }
 
-    private MessageRequest parseRequestMessage() throws ParseException {
+    private RequestMessage parseRequestMessage() throws ParseException {
         Operation operation = parseOperation();
         int clientId = nextInt();
         int requestNumber = nextInt();
-        return new MessageRequest(operation, clientId, requestNumber);
+        return new RequestMessage(operation, clientId, requestNumber);
     }
 
     private int nextInt() {

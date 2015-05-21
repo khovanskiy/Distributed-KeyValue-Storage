@@ -1,15 +1,31 @@
 package com.khovanskiy.dkvstorage.vr;
 
-import com.khovanskiy.dkvstorage.vr.message.*;
+import com.khovanskiy.dkvstorage.vr.message.IdentificationMessage;
+import com.khovanskiy.dkvstorage.vr.message.Message;
+import com.khovanskiy.dkvstorage.vr.message.MessageHandler;
+import com.khovanskiy.dkvstorage.vr.message.MessageReply;
+import com.khovanskiy.dkvstorage.vr.message.PrepareMessage;
+import com.khovanskiy.dkvstorage.vr.message.PrepareOkMessage;
+import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
 import com.khovanskiy.dkvstorage.vr.operation.Operation;
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.text.ParseException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -29,13 +45,16 @@ public class Replica {
                     MessageEntry entry = messages.take();
                     MessageHandler parser = new MessageHandler(entry.getRawMessage());
                     Message message = parser.parse();
-                    trace("Process message " + message + " from connection " + entry.getConnection());
+                    trace("Process message " + message + " from connection " + entry.getSocketConnection());
+                    // TODO: replace this workaround
                     if (message instanceof IdentificationMessage) {
-                        onReceivedIdentification(entry.getConnection(), (IdentificationMessage) message);
-                    } else if (message instanceof MessageRequest) {
-                        onReceivedRequest((MessageRequest) message);
-                    } else if (message instanceof MessagePrepare) {
-                        onReceivedPrepare((MessagePrepare) message);
+                        onReceivedIdentification(entry.getSocketConnection(), (IdentificationMessage) message);
+                    } else if (message instanceof RequestMessage) {
+                        onReceivedRequest((RequestMessage) message);
+                    } else if (message instanceof PrepareMessage) {
+                        onReceivedPrepare((PrepareMessage) message);
+                    } else if (message instanceof PrepareOkMessage) {
+                        onReceivedPrepareOk((PrepareOkMessage) message);
                     }
                 } catch (InterruptedException ignored) {
                 } catch (ParseException e) {
@@ -44,22 +63,50 @@ public class Replica {
             }
         }
     };
-    public List<Replica> configuration;
+    /**
+     * This is a sorted array containing the 2f + 1 replicas.
+     */
+    private List<Replica> configuration;
+    /**
+     * This is the index into the configuration where this replica is stored.
+     */
     private final int replicaNumber;
-    public int viewNumber;
-    public ReplicaStatus status;
-    public int opNumber;
-    public List<LogEntry> log = new ArrayList<>();
-    public int commitNumber;
-    public Map<Integer, ClientEntry> clientTable = new HashMap<>();
+    /**
+     * The current view-number, initially 0.
+     */
+    private int viewNumber = 0;
+    /**
+     * The current status, either @code{ReplicaStatus.NORMAL}, @code{ReplicaStatus.VIEW_CHANGE}, or @code{ReplicaStatus.RECOVERING}
+     */
+    private ReplicaStatus status;
+    /**
+     * This is assigned to the most recently received request, initially 0.
+     */
+    private int opNumber = 0;
+    /**
+     * This is an array containing op-number entries. The entries contain the requests that have been received so far in their assigned order.
+     */
+    private final List<LogEntry> log = new ArrayList<>();
+    /**
+     * This is the op-number of the most recently committed operation.
+     */
+    private int commitNumber;
+    /**
+     * This records for each client the number of its most recent request, plus, if the request has been executed, the result sent for that request.
+     */
+    private final Map<Integer, ClientEntry> clientTable = new HashMap<>();
+
+
+    private final Map<Integer, Map<Integer, Boolean>> ballotTable = new HashMap<>();
+    private int quorumSize;
 
     //private Logger logger = Logger.getLogger(Replica.class.getName());
     private int primaryNumber;
     private final String host;
     private final int port;
-    private List<Connection> outgoing;
-    private Map<Integer, Connection> incoming;
-    private Set<Connection> unknowns;
+    private List<SocketConnection> outgoing;
+    private Map<Integer, SocketConnection> incoming;
+    private Set<SocketConnection> unknowns;
     private ServerSocket serverSocket;
     public Map<String, String> storage = new HashMap<>();
 
@@ -77,44 +124,45 @@ public class Replica {
             }
         }
     };
-    private final Connection.ConnectionListener incomingListener = new Connection.ConnectionListener() {
+
+    private final SocketConnection.ConnectionListener incomingListener = new SocketConnection.ConnectionListener() {
         @Override
-        public void onDisconnected(Connection connection, @Nullable IOException e) {
-            trace("Disconnected " + connection);
+        public void onDisconnected(SocketConnection socketConnection, @Nullable IOException e) {
+            trace("Disconnected " + socketConnection);
         }
 
         @Override
-        public void onConnected(Connection connection) {
-            trace("Connected " + connection);
+        public void onConnected(SocketConnection socketConnection) {
+            trace("Connected " + socketConnection);
         }
 
         @Override
-        public void onReceived(Connection connection, @NotNull String line) {
-            trace("Replica received \"" + line + "\" from incoming connection " + connection);
+        public void onReceived(SocketConnection socketConnection, @NotNull String line) {
+            trace("Replica received \"" + line + "\" from incoming connection " + socketConnection);
             try {
-                messages.put(new MessageEntry(connection, line));
+                messages.put(new MessageEntry(socketConnection, line));
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
     };
-    private final Connection.ConnectionListener outgoingListener = new Connection.ConnectionListener() {
+    private final SocketConnection.ConnectionListener outgoingListener = new SocketConnection.ConnectionListener() {
         @Override
-        public void onDisconnected(Connection connection, @Nullable IOException e) {
-            trace("Disconnected " + connection);
+        public void onDisconnected(SocketConnection socketConnection, @Nullable IOException e) {
+            trace("Disconnected " + socketConnection);
         }
 
         @Override
-        public void onConnected(Connection connection) {
-            trace("Connected to outgoing " + connection);
-            sendTo(connection, new IdentificationMessage(getReplicaNumber()));
+        public void onConnected(SocketConnection socketConnection) {
+            trace("Connected to outgoing " + socketConnection);
+            sendTo(socketConnection, new IdentificationMessage(getReplicaNumber()));
         }
 
         @Override
-        public void onReceived(Connection connection, @NotNull String line) {
+        public void onReceived(SocketConnection socketConnection, @NotNull String line) {
             //trace("Replica received \"" + line + "\" from outgoing connection " + connection);
             try {
-                messages.put(new MessageEntry(connection, line));
+                messages.put(new MessageEntry(socketConnection, line));
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -133,10 +181,27 @@ public class Replica {
 
     public void start(List<Replica> configuration) throws IOException {
         //trace("Replica " + toString() + " starting...");
+        this.quorumSize = configuration.size() / 2 + 1;
+        this.status = ReplicaStatus.NORMAL;
         this.primaryNumber = configuration.get(0).getReplicaNumber();
         this.configuration = configuration;
-        this.serverSocket = new ServerSocket(getPort());
+        //this.serverSocket = new ServerSocket(getPort());
 
+        ConnectionSelector connectionSelector = new ConnectionSelector(getHost(), getPort());
+
+        for (Replica replica : configuration) {
+            if (replica.getReplicaNumber() == getReplicaNumber()) {
+                continue;
+            }
+            ConnectionSelector.Connection connection = new ConnectionSelector.Connection(replica.getHost(), replica.getPort());
+            connection.setKeepConnection(true);
+            connectionSelector.connect(connection);
+            break;
+        }
+
+        connectionSelector.start();
+
+        /*
         this.outgoing = new ArrayList<>(this.configuration.size() - 1);
         this.incoming = new HashMap<>(this.configuration.size());
         this.unknowns = new HashSet<>(this.configuration.size());
@@ -150,7 +215,7 @@ public class Replica {
             Connection connection = new Connection(replica.getHost(), replica.getPort());
             connection.setKeepConnection(true);
             connection.setConnectionListener(outgoingListener);
-            outgoing.add(connection);
+            outgoing.connect(connection);
             //trace(k++ + ") Created connection to " + replica);
         }
 
@@ -163,41 +228,41 @@ public class Replica {
 
         //trace("Launch executor and accepter runnables");
         backgroundExecutor.submit(runnableExecutor);
-        backgroundExecutor.submit(runnableAccepter);
+        backgroundExecutor.submit(runnableAccepter);*/
     }
 
     private synchronized void trace(String s) {
         System.out.println(s);
     }
 
-    private synchronized void sendTo(Connection connection, Message message) {
-        connection.send(message.toString());
+    private synchronized void sendTo(SocketConnection socketConnection, Message message) {
+        socketConnection.send(message.toString());
     }
 
     private synchronized void sendOtherReplicas(Message message) {
-        for (Connection connection : outgoing) {
-            connection.send(message.toString());
+        for (SocketConnection socketConnection : outgoing) {
+            socketConnection.send(message.toString());
         }
     }
 
     private synchronized void onAccept(@NotNull Socket socket) {
-        Connection connection = new Connection(socket);
+        SocketConnection socketConnection = new SocketConnection(socket);
         //trace("Accept " + connection);
-        unknowns.add(connection);
-        connection.setConnectionListener(incomingListener);
-        connection.start();
+        unknowns.add(socketConnection);
+        socketConnection.setConnectionListener(incomingListener);
+        socketConnection.start();
     }
 
 
-    public void onReceivedIdentification(Connection connection, IdentificationMessage identification) {
-        if (unknowns.contains(connection)) {
-            incoming.put(identification.getId(), connection);
-            unknowns.remove(connection);
-            sendTo(connection, new MessageReply("ACCEPTED"));
+    public void onReceivedIdentification(SocketConnection socketConnection, IdentificationMessage identification) {
+        if (unknowns.contains(socketConnection)) {
+            incoming.put(identification.getId(), socketConnection);
+            unknowns.remove(socketConnection);
+            sendTo(socketConnection, new MessageReply("ACCEPTED"));
         }
     }
 
-    public void onReceivedRequest(MessageRequest request) {
+    public void onReceivedRequest(RequestMessage request) {
         if (!isPrimary()) {
             return;
         }
@@ -206,13 +271,18 @@ public class Replica {
         if (entry != null) {
             // If the request-number s isn’t bigger than the information in the table
             if (request.getRequestNumber() < entry.getRequest().getRequestNumber()) {
-                // drops
+                // drops stale request
                 return;
             }
             // if the request is the most recent one from this client and it has already been executed
-            if (request.getRequestNumber() == entry.getRequest().getRequestNumber() && entry.hasExecuted()) {
-                // re-send the response
-
+            if (request.getRequestNumber() == entry.getRequest().getRequestNumber()) {
+                if (entry.isProcessing()) {
+                    // still processing request
+                    return;
+                } else {
+                    // re-send the response
+                    replyClient(request.getClientId(), entry.getReply());
+                }
             }
         }
 
@@ -225,14 +295,19 @@ public class Replica {
         // updates the information for this client in the client-table to contain the new request number
         clientTable.put(request.getClientId(), new ClientEntry(request));
 
-        commitUpTo(opNumber);
+        // prepare table for ballot by voting backups
+        ballotTable.put(opNumber, new HashMap<>());
 
         // sends a <PREPARE v, m, n, k> message to the other replicas
-        Message prepare = new MessagePrepare(viewNumber, request, opNumber, commitNumber);
-        //sendOtherReplicas(prepare);
+        Message prepare = new PrepareMessage(viewNumber, request, opNumber, commitNumber);
+        sendOtherReplicas(prepare);
     }
 
-    public void onReceivedPrepare(MessagePrepare prepare) {
+    public void replyClient(int clientId, MessageReply reply) {
+        // TODO
+    }
+
+    public void onReceivedPrepare(PrepareMessage prepare) {
         if (prepare.getViewNumber() > viewNumber) {
             //If this node also thinks it is a prmary, will do recovery
             //go s.StartRecovery()
@@ -254,6 +329,7 @@ public class Replica {
             return;
         }
 
+        // won’t accept a prepare with op-number n until it has entries for all earlier requests in its log.
         commitUpTo(prepare.getCommitNumber());
 
         //increments its op-number
@@ -265,12 +341,45 @@ public class Replica {
         clientTable.put(prepare.getRequest().getClientId(), new ClientEntry(prepare.getRequest()));
     }
 
+    public void onReceivedPrepareOk(PrepareOkMessage prepareOk) {
+        // Ignore commited operations
+        if (prepareOk.getOpNumber() <= commitNumber) {
+            return;
+        }
+
+        // Update table for PrepareOK messages
+        Map<Integer, Boolean> ballot = ballotTable.get(prepareOk.getOpNumber());
+        if (ballot == null) {
+            return;
+        }
+        ballot.put(prepareOk.getBackupNumber(), true);
+
+        // Commit operations agreed by quorum
+        if (prepareOk.getOpNumber() > commitNumber + 1) {
+            return;
+        }
+
+        while (commitNumber < opNumber) {
+            ballot = ballotTable.get(commitNumber + 1);
+            if (ballot.size() + 1 >= quorumSize) {
+                executeNextOp();
+                ballotTable.remove(commitNumber);
+            } else {
+                break;
+            }
+        }
+    }
+
+    private void executeNextOp() {
+        RequestMessage request = log.get(commitNumber + 1).getRequest();
+        clientTable.get(request.getClientId()).setReply(upCall(request.getOperation()));
+        clientTable.get(request.getClientId()).setProcessing(false);
+        ++commitNumber;
+    }
+
     private void commitUpTo(int primaryCommit) {
-        // won’t accept a prepare with op-number n until it has entries for all earlier requests in its log.
         while (commitNumber < primaryCommit && commitNumber < opNumber) {
-            MessageRequest request = log.get(commitNumber + 1).getRequest();
-            clientTable.get(request.getClientId()).setReply(upCall(request.getOperation()));
-            ++commitNumber;
+            executeNextOp();
         }
     }
 
@@ -297,16 +406,16 @@ public class Replica {
     }
 
     private class MessageEntry {
-        private Connection connection;
+        private SocketConnection socketConnection;
         private String message;
 
-        public MessageEntry(Connection connection, String message) {
-            this.connection = connection;
+        public MessageEntry(SocketConnection socketConnection, String message) {
+            this.socketConnection = socketConnection;
             this.message = message;
         }
 
-        public Connection getConnection() {
-            return connection;
+        public SocketConnection getSocketConnection() {
+            return socketConnection;
         }
 
         public String getRawMessage() {

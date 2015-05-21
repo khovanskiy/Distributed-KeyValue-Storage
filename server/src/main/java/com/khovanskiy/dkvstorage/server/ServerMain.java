@@ -1,8 +1,6 @@
 package com.khovanskiy.dkvstorage.server;
 
-import com.khovanskiy.dkvstorage.vr.Connection;
 import com.khovanskiy.dkvstorage.vr.Replica;
-import com.khovanskiy.dkvstorage.vr.ServerNode;
 
 import java.io.BufferedReader;
 import java.io.FileReader;

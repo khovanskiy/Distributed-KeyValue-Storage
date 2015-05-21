@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * @author Victor Khovanskiy
  */
-public class Connection {
+public class SocketConnection {
 
     private final static int DISCONNECTED = 0;
     private final static int RECONNECTING = 1;
@@ -31,7 +31,7 @@ public class Connection {
     private AtomicInteger connected = new AtomicInteger(DISCONNECTED);
     private final ConnectionListener selfListener = new ConnectionListener() {
         @Override
-        public void onConnected(Connection node) {
+        public void onConnected(SocketConnection node) {
             if (connected.compareAndSet(RECONNECTING, CONNECTED)) {
                 if (listener != null) {
                     listener.onConnected(node);
@@ -40,14 +40,14 @@ public class Connection {
         }
 
         @Override
-        public void onReceived(Connection node, @NotNull String line) {
+        public void onReceived(SocketConnection node, @NotNull String line) {
             if (listener != null) {
                 listener.onReceived(node, line);
             }
         }
 
         @Override
-        public void onDisconnected(Connection node, @Nullable IOException e) {
+        public void onDisconnected(SocketConnection node, @Nullable IOException e) {
             if (connected.compareAndSet(CONNECTED, DISCONNECTED)) {
                 running.set(false);
                 if (listener != null) {
@@ -69,7 +69,7 @@ public class Connection {
                     try {
                         socket = new Socket(address.getAddress(), address.getPort());
                         updateRW();
-                        selfListener.onConnected(Connection.this);
+                        selfListener.onConnected(SocketConnection.this);
                     } catch (IOException e) {
                         connected.set(DISCONNECTED);
                     }
@@ -98,9 +98,9 @@ public class Connection {
                     try {
                         tryReading();
                     } catch (IOException exception) {
-                        selfListener.onDisconnected(Connection.this, exception);
+                        selfListener.onDisconnected(SocketConnection.this, exception);
                     } finally {
-                        selfListener.onDisconnected(Connection.this, null);
+                        selfListener.onDisconnected(SocketConnection.this, null);
                     }
                     // connection failed -> leave loop
                 }
@@ -115,7 +115,7 @@ public class Connection {
             String line;
             while ((line = reader.readLine()) != null) {
                 //System.out.println("Recieved message \"" + line + "\"");
-                selfListener.onReceived(Connection.this, line);
+                selfListener.onReceived(SocketConnection.this, line);
             }
         }
     };
@@ -139,9 +139,9 @@ public class Connection {
                     try {
                         runWriting();
                     } catch (IOException exception) {
-                        selfListener.onDisconnected(Connection.this, exception);
+                        selfListener.onDisconnected(SocketConnection.this, exception);
                     } finally {
-                        selfListener.onDisconnected(Connection.this, null);
+                        selfListener.onDisconnected(SocketConnection.this, null);
                     }
                     // connection failed -> leave loop
                 }
@@ -166,17 +166,17 @@ public class Connection {
         }
     };
 
-    public Connection(String host, int port) {
+    public SocketConnection(String host, int port) {
         this.address = new InetSocketAddress(host, port);
         this.connected.set(DISCONNECTED);
     }
 
-    public Connection(InetSocketAddress address) {
+    public SocketConnection(InetSocketAddress address) {
         this.address = address;
         this.connected.set(DISCONNECTED);
     }
 
-    public Connection(Socket socket) {
+    public SocketConnection(Socket socket) {
         this.socket = socket;
         this.address = (InetSocketAddress) this.socket.getRemoteSocketAddress();
         this.connected.set(CONNECTED);
@@ -237,15 +237,15 @@ public class Connection {
 
     public static abstract class ConnectionListener {
 
-        public void onConnected(Connection node) {
+        public void onConnected(SocketConnection node) {
 
         }
 
-        public void onReceived(Connection node, @NotNull String line) {
+        public void onReceived(SocketConnection node, @NotNull String line) {
 
         }
 
-        public void onDisconnected(Connection node, @Nullable IOException e) {
+        public void onDisconnected(SocketConnection node, @Nullable IOException e) {
 
         }
     }

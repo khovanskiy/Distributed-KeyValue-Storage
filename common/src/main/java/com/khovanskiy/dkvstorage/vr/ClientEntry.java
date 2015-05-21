@@ -1,16 +1,17 @@
 package com.khovanskiy.dkvstorage.vr;
 
 import com.khovanskiy.dkvstorage.vr.message.MessageReply;
-import com.khovanskiy.dkvstorage.vr.message.MessageRequest;
+import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
 
 /**
  * @author Victor Khovanskiy
  */
 public class ClientEntry {
-    private MessageRequest request;
+    private RequestMessage request;
     private MessageReply reply;
+    private boolean processing;
 
-    public ClientEntry(MessageRequest request) {
+    public ClientEntry(RequestMessage request) {
         this.request = request;
     }
 
@@ -22,15 +23,20 @@ public class ClientEntry {
         this.reply = reply;
     }
 
-    public boolean hasExecuted() {
-        return false;
-    }
 
-    public MessageRequest getRequest() {
+    public RequestMessage getRequest() {
         return request;
     }
 
-    public void setRequest(MessageRequest request) {
+    public void setRequest(RequestMessage request) {
         this.request = request;
+    }
+
+    public boolean isProcessing() {
+        return processing;
+    }
+
+    public void setProcessing(boolean processing) {
+        this.processing = processing;
     }
 }
