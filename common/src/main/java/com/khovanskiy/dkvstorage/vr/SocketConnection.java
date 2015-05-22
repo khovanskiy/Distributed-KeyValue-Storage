@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author Victor Khovanskiy
+ * @deprecated
  */
 public class SocketConnection {
 
@@ -57,9 +58,6 @@ public class SocketConnection {
         }
     };
     private AtomicBoolean keepConnection = new AtomicBoolean(false);
-    private BufferedReader reader;
-    private BufferedWriter writer;
-
     private final Runnable runnableReconnector = new Runnable() {
         @Override
         public void run() {
@@ -77,6 +75,7 @@ public class SocketConnection {
             }
         }
     };
+    private BufferedReader reader;
     private final Runnable runnableReader = new Runnable() {
         @Override
         public void run() {
@@ -119,6 +118,7 @@ public class SocketConnection {
             }
         }
     };
+    private BufferedWriter writer;
     private LinkedBlockingQueue<String> messages = new LinkedBlockingQueue<>();
     private final Runnable runnableWriter = new Runnable() {
         @Override
@@ -186,7 +186,7 @@ public class SocketConnection {
     private void updateRW() {
         try {
             reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            writer  = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));
+            writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));
         } catch (IOException e) {
         }
     }
@@ -235,6 +235,11 @@ public class SocketConnection {
         this.listener = listener;
     }
 
+    @Override
+    public String toString() {
+        return getHost() + ":" + getPort();
+    }
+
     public static abstract class ConnectionListener {
 
         public void onConnected(SocketConnection node) {
@@ -248,10 +253,5 @@ public class SocketConnection {
         public void onDisconnected(SocketConnection node, @Nullable IOException e) {
 
         }
-    }
-
-    @Override
-    public String toString() {
-        return getHost() + ":" + getPort();
     }
 }

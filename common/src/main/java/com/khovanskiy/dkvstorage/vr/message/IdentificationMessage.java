@@ -1,7 +1,5 @@
 package com.khovanskiy.dkvstorage.vr.message;
 
-import com.khovanskiy.dkvstorage.vr.Replica;
-
 /**
  * @author Victor Khovanskiy
  */

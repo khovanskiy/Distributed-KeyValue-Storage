@@ -12,20 +12,9 @@ import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
 import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -35,34 +24,63 @@ import java.util.concurrent.LinkedBlockingQueue;
  */
 public class Replica {
 
-    private final LinkedBlockingQueue<MessageEntry> messages = new LinkedBlockingQueue<>();
+    private class Client {
+        private int clientId;
+        private int connectionId;
+
+        public Client(int clientId, int connectionId) {
+            this.clientId = clientId;
+            this.connectionId = connectionId;
+        }
+
+        public int getClientId() {
+            return clientId;
+        }
+
+        public int getConnectionId() {
+            return connectionId;
+        }
+    }
+
     private final ExecutorService backgroundExecutor = Executors.newCachedThreadPool();
-    private final Runnable runnableExecutor = new Runnable() {
+    private final Looper looper = new Looper();
+    private final Network.ConnectionListener connectionListener = new Network.ConnectionListener() {
         @Override
-        public void run() {
-            while (true) {
-                try {
-                    MessageEntry entry = messages.take();
-                    MessageHandler parser = new MessageHandler(entry.getRawMessage());
-                    Message message = parser.parse();
-                    trace("Process message " + message + " from connection " + entry.getSocketConnection());
-                    // TODO: replace this workaround
-                    if (message instanceof IdentificationMessage) {
-                        onReceivedIdentification(entry.getSocketConnection(), (IdentificationMessage) message);
-                    } else if (message instanceof RequestMessage) {
-                        onReceivedRequest((RequestMessage) message);
-                    } else if (message instanceof PrepareMessage) {
-                        onReceivedPrepare((PrepareMessage) message);
-                    } else if (message instanceof PrepareOkMessage) {
-                        onReceivedPrepareOk((PrepareOkMessage) message);
-                    }
-                } catch (InterruptedException ignored) {
-                } catch (ParseException e) {
-                    e.printStackTrace();
+        public void onConnected(int connectionId) {
+            looper.run(new Runnable() {
+                @Override
+                public void run() {
+                    Replica.this.onConnected(connectionId);
                 }
-            }
+            });
+        }
+
+        @Override
+        public void onDisconnected(int connectionId) {
+            looper.run(new Runnable() {
+                @Override
+                public void run() {
+                    Replica.this.onDisconnected(connectionId);
+                }
+            });
+        }
+
+        @Override
+        public void onAccept(int connectionId) {
+            looper.run(new Runnable() {
+                @Override
+                public void run() {
+                    Replica.this.onAccepted(connectionId);
+                }
+            });
+        }
+
+        @Override
+        public void onReceived(int connectionId, String line) {
+            Replica.this.onReceived(connectionId, line);
         }
     };
+
     /**
      * This is a sorted array containing the 2f + 1 replicas.
      */
@@ -104,70 +122,12 @@ public class Replica {
     private int primaryNumber;
     private final String host;
     private final int port;
-    private List<SocketConnection> outgoing;
-    private Map<Integer, SocketConnection> incoming;
-    private Set<SocketConnection> unknowns;
-    private ServerSocket serverSocket;
+    private Set<Integer> outgoing;
+    private Set<Integer> incoming;
+    private Set<Integer> incomingClients;
+    private Set<Integer> incomingReplicas;
+    private Network network;
     public Map<String, String> storage = new HashMap<>();
-
-    private final Runnable runnableAccepter = new Runnable() {
-        @Override
-        public void run() {
-            while (true) {
-                //trace("Try accept...");
-                try {
-                    Socket socket = serverSocket.accept();
-                    onAccept(socket);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-    };
-
-    private final SocketConnection.ConnectionListener incomingListener = new SocketConnection.ConnectionListener() {
-        @Override
-        public void onDisconnected(SocketConnection socketConnection, @Nullable IOException e) {
-            trace("Disconnected " + socketConnection);
-        }
-
-        @Override
-        public void onConnected(SocketConnection socketConnection) {
-            trace("Connected " + socketConnection);
-        }
-
-        @Override
-        public void onReceived(SocketConnection socketConnection, @NotNull String line) {
-            trace("Replica received \"" + line + "\" from incoming connection " + socketConnection);
-            try {
-                messages.put(new MessageEntry(socketConnection, line));
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-    };
-    private final SocketConnection.ConnectionListener outgoingListener = new SocketConnection.ConnectionListener() {
-        @Override
-        public void onDisconnected(SocketConnection socketConnection, @Nullable IOException e) {
-            trace("Disconnected " + socketConnection);
-        }
-
-        @Override
-        public void onConnected(SocketConnection socketConnection) {
-            trace("Connected to outgoing " + socketConnection);
-            sendTo(socketConnection, new IdentificationMessage(getReplicaNumber()));
-        }
-
-        @Override
-        public void onReceived(SocketConnection socketConnection, @NotNull String line) {
-            //trace("Replica received \"" + line + "\" from outgoing connection " + connection);
-            try {
-                messages.put(new MessageEntry(socketConnection, line));
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-    };
 
     public Replica(int replicaNumber, String host, int port) throws IOException {
         this.replicaNumber = replicaNumber;
@@ -180,85 +140,92 @@ public class Replica {
     }
 
     public void start(List<Replica> configuration) throws IOException {
-        //trace("Replica " + toString() + " starting...");
+        trace("Replica " + toString() + " starting...");
         this.quorumSize = configuration.size() / 2 + 1;
         this.status = ReplicaStatus.NORMAL;
         this.primaryNumber = configuration.get(0).getReplicaNumber();
         this.configuration = configuration;
-        //this.serverSocket = new ServerSocket(getPort());
+        this.network = new Network(getHost(), getPort());
 
-        ConnectionSelector connectionSelector = new ConnectionSelector(getHost(), getPort());
+        this.outgoing = new HashSet<>(this.configuration.size() - 1);
+        this.incoming = new HashSet<>(this.configuration.size());
 
+        trace("Creating outgoing connections to other replicas: ");
+        int k = 1;
         for (Replica replica : configuration) {
             if (replica.getReplicaNumber() == getReplicaNumber()) {
                 continue;
             }
-            ConnectionSelector.Connection connection = new ConnectionSelector.Connection(replica.getHost(), replica.getPort());
-            connection.setKeepConnection(true);
-            connectionSelector.connect(connection);
-            break;
+            int connectionId = network.connect(replica.getHost(), replica.getPort(), true);
+            outgoing.add(connectionId);
+            trace(k++ + ") Created connection to " + replica);
         }
 
-        connectionSelector.start();
+        network.setConnectionListener(connectionListener);
+        network.start();
 
-        /*
-        this.outgoing = new ArrayList<>(this.configuration.size() - 1);
-        this.incoming = new HashMap<>(this.configuration.size());
-        this.unknowns = new HashSet<>(this.configuration.size());
-
-        //trace("Creating outgoing connections to other replicas: ");
-        int k = 1;
-        for (Replica replica : this.configuration) {
-            if (replica.getReplicaNumber() == replicaNumber) {
-                continue;
-            }
-            Connection connection = new Connection(replica.getHost(), replica.getPort());
-            connection.setKeepConnection(true);
-            connection.setConnectionListener(outgoingListener);
-            outgoing.connect(connection);
-            //trace(k++ + ") Created connection to " + replica);
-        }
-
-        //trace("Starting outgoing connections to other replicas: ");
-        k = 1;
-        for (Connection connection : outgoing) {
-            connection.start();
-            //trace(k++ + ") Started connection " + connection);
-        }
-
-        //trace("Launch executor and accepter runnables");
-        backgroundExecutor.submit(runnableExecutor);
-        backgroundExecutor.submit(runnableAccepter);*/
+        trace("Launch processing looper");
+        backgroundExecutor.submit(looper);
     }
 
-    private synchronized void trace(String s) {
+    private void trace(String s) {
         System.out.println(s);
     }
 
-    private synchronized void sendTo(SocketConnection socketConnection, Message message) {
-        socketConnection.send(message.toString());
+    private void onConnected(int connectionId) {
+        trace("Connected to remote #" + connectionId);
+        sendTo(connectionId, new IdentificationMessage(getReplicaNumber()));
     }
 
-    private synchronized void sendOtherReplicas(Message message) {
-        for (SocketConnection socketConnection : outgoing) {
-            socketConnection.send(message.toString());
+    private void onDisconnected(int connectionId) {
+        trace("Disconnected #" + connectionId);
+    }
+
+    private void onAccepted(int connectionId) {
+        trace("Accepted #" + connectionId);
+        incoming.add(connectionId);
+    }
+
+    private void onReceived(int connectionId, String line) {
+        trace("Received from #" + connectionId + ": " + line);
+        MessageHandler parser = new MessageHandler(line);
+        Message message;
+        try {
+            message = parser.parse();
+        } catch (ParseException exception) {
+            System.out.println("Invalid message: " + exception.getMessage());
+            return;
+        }
+        // TODO: replace this workaround
+        if (message instanceof IdentificationMessage) {
+            onReceivedIdentification(connectionId, (IdentificationMessage) message);
+        } else if (message instanceof RequestMessage) {
+
+            onReceivedRequest((RequestMessage) message);
+        } else if (message instanceof PrepareMessage) {
+            onReceivedPrepare((PrepareMessage) message);
+        } else if (message instanceof PrepareOkMessage) {
+            onReceivedPrepareOk((PrepareOkMessage) message);
         }
     }
 
-    private synchronized void onAccept(@NotNull Socket socket) {
-        SocketConnection socketConnection = new SocketConnection(socket);
-        //trace("Accept " + connection);
-        unknowns.add(socketConnection);
-        socketConnection.setConnectionListener(incomingListener);
-        socketConnection.start();
+    private void sendTo(int connectionId, Message message) {
+        network.send(connectionId, message.toString());
     }
 
+    private void sendOtherReplicas(Message message) {
+        for (int connectionId : outgoing) {
+            network.send(connectionId, message.toString());
+        }
+    }
 
-    public void onReceivedIdentification(SocketConnection socketConnection, IdentificationMessage identification) {
-        if (unknowns.contains(socketConnection)) {
-            incoming.put(identification.getId(), socketConnection);
-            unknowns.remove(socketConnection);
-            sendTo(socketConnection, new MessageReply("ACCEPTED"));
+    public void onReceivedIdentification(int connectionId, IdentificationMessage identification) {
+        if (incoming.contains(connectionId)) {
+            incoming.remove(connectionId);
+            if (incomingReplicas.contains(connectionId)) {
+                network.disconnect(connectionId);
+            }
+            sendTo(connectionId, new MessageReply("ACCEPTED"));
         }
     }
 
@@ -403,23 +370,5 @@ public class Replica {
     @Override
     public String toString() {
         return getHost() + ":" + getPort();
-    }
-
-    private class MessageEntry {
-        private SocketConnection socketConnection;
-        private String message;
-
-        public MessageEntry(SocketConnection socketConnection, String message) {
-            this.socketConnection = socketConnection;
-            this.message = message;
-        }
-
-        public SocketConnection getSocketConnection() {
-            return socketConnection;
-        }
-
-        public String getRawMessage() {
-            return message;
-        }
     }
 }
