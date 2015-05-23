@@ -50,12 +50,9 @@ public class ServerMain {
                 }
             }
         }
-
-        System.out.println("Current node: " + current);
-        System.out.println("Other nodes:");
         for (Replica replica : configuration) {
-            System.out.println(replica);
+            replica.start(configuration);
         }
-        current.start(configuration);
+        //current.start(configuration);
     }
 }

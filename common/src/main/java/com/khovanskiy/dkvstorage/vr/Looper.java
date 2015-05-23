@@ -15,7 +15,9 @@ public class Looper implements Runnable {
             try {
                 Runnable event = events.take();
                 event.run();
-            } catch (InterruptedException e) {
+            } catch (InterruptedException ignored) {
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
     }

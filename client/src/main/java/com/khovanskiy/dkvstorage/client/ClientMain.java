@@ -1,5 +1,6 @@
 package com.khovanskiy.dkvstorage.client;
 
+import com.khovanskiy.dkvstorage.vr.Network;
 import com.khovanskiy.dkvstorage.vr.SocketConnection;
 import com.khovanskiy.dkvstorage.vr.message.MessageHandler;
 import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
@@ -22,43 +23,42 @@ public class ClientMain {
     }
 
     private void execute() throws IOException {
-        SocketConnection socketConnection = new SocketConnection("localhost", 111);
-        socketConnection.setKeepConnection(true);
-        socketConnection.setConnectionListener(new SocketConnection.ConnectionListener() {
+        Network network = new Network();
+
+        int serverConnection = network.connect("localhost", 222, true);
+        network.setConnectionListener(new Network.ConnectionListener() {
             @Override
-            public void onConnected(SocketConnection node) {
+            public void onConnected(int connectionId) {
                 System.out.println("Connected to server");
             }
 
             @Override
-            public void onReceived(SocketConnection node, @NotNull String line) {
-                System.out.println("Server response: " + line);
+            public void onDisconnected(int connectionId) {
+                System.out.println("Disconnected from server");
             }
 
             @Override
-            public void onDisconnected(SocketConnection node, @Nullable IOException e) {
-                System.out.println("Disconnected from server");
+            public void onReceived(int connectionId, String line) {
+                System.out.println("Server response: " + line);
             }
         });
-        socketConnection.start();
+        network.start();
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        int clientId = 5;
-        int requestNumber = 0;
         while (true) {
             String line = reader.readLine();
             if (line == null || line.equals("q")) {
-                socketConnection.stop();
+                network.stop();
                 return;
             }
-            MessageHandler parser = new MessageHandler(line);
+            network.send(serverConnection, line);
+            /*MessageHandler parser = new MessageHandler(line);
             try {
                 Operation operation = parser.parseOperation();
-                RequestMessage request = new RequestMessage(operation, clientId, requestNumber);
-                System.out.println("Send request: " + request);
-                socketConnection.send(request.toString());
+                System.out.println("Send request: " + operation);
+                network.send(serverConnection, operation.toString());
             } catch (ParseException e) {
                 e.printStackTrace();
-            }
+            }*/
         }
     }
 }

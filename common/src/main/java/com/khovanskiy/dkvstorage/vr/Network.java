@@ -11,21 +11,24 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author Victor Khovanskiy
  */
 public class Network {
 
+    private final static String LINE_SEPARATOR = "\n";
     private final Selector selector;
     private final LinkedList<Request> pendingChanges = new LinkedList<>();
     private final Map<Integer, Connection> connections = new HashMap<>();
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
+    private final ByteBuffer readBuffer = ByteBuffer.allocate(8192);
+    private AtomicBoolean running = new AtomicBoolean(false);
     private final Runnable runnable = new Runnable() {
         @Override
         public void run() {
-            while (true) {
-                //System.out.println("loop");
+            while (running.get()) {
                 synchronized (pendingChanges) {
                     while (!pendingChanges.isEmpty()) {
                         Request request = pendingChanges.poll();
@@ -80,13 +83,10 @@ public class Network {
             }
         }
     };
-    private final ByteBuffer readBuffer = ByteBuffer.allocate(8192);
-    private final InetSocketAddress address;
     private ConnectionListener listener = new ConnectionListener();
     private int nextConnectionId = 0;
 
-    public Network(String host, int port) throws IOException {
-        this.address = new InetSocketAddress(host, port);
+    public Network() throws IOException {
         this.selector = Selector.open();
     }
 
@@ -102,6 +102,10 @@ public class Network {
             listener.onAccept(connection.getId());
         } catch (IOException ignored) {
         }
+    }
+
+    public String dump(int connectionId) {
+        return getConnection(connectionId) + "";
     }
 
     private void onConnectable(SelectionKey key) {
@@ -183,24 +187,51 @@ public class Network {
         }
     }
 
+    /**
+     * Starts handler loop and all added connections
+     *
+     * @throws IOException
+     */
     public void start() throws IOException {
-        ServerSocketChannel channel = ServerSocketChannel.open();
-        channel.configureBlocking(false);
-        channel.bind(address);
-        channel.register(selector, SelectionKey.OP_ACCEPT);
-        backgroundExecutor.submit(runnable);
+        if (running.compareAndSet(false, true)) {
+            backgroundExecutor.submit(runnable);
+        }
     }
 
+    /**
+     * Stops handler loop and all added connections
+     */
+    public void stop() {
+        running.set(false);
+    }
+
+    /**
+     * Send string message by @code{connectionId}
+     *
+     * @param connectionId connection's id
+     * @param line         message to send
+     */
     public void send(int connectionId, String line) {
         Connection connection = getConnection(connectionId);
         Queue<ByteBuffer> queue = connection.getQueue();
-        ByteBuffer buffer = ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8));
         synchronized (queue) {
-            queue.add(buffer);
+            queue.add(ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8)));
+            queue.add(ByteBuffer.wrap(LINE_SEPARATOR.getBytes(StandardCharsets.UTF_8)));
         }
         synchronized (pendingChanges) {
             pendingChanges.add(new Request(connection, RequestType.CHANGEOPS, SelectionKey.OP_WRITE));
         }
+
+        selector.wakeup();
+    }
+
+    public int server(String host, int port) throws IOException {
+        InetSocketAddress address = new InetSocketAddress(host, port);
+        ServerSocketChannel channel = ServerSocketChannel.open();
+        channel.configureBlocking(false);
+        channel.bind(address);
+        channel.register(selector, SelectionKey.OP_ACCEPT);
+        return -1;
     }
 
     public int connect(String host, int port, boolean keepConnection) {
@@ -242,7 +273,7 @@ public class Network {
     }
 
     private void reconnect(Connection connection) {
-        System.out.println("Try reconnect " + connection);
+        //System.out.println("Try reconnect " + connection);
         try {
             SocketChannel channel = SocketChannel.open();
             channel.configureBlocking(false);
@@ -351,7 +382,7 @@ public class Network {
 
         @Override
         public String toString() {
-            return getHost() + ":" + getPort();
+            return "[" + getId() + " | " + getHost() + ":" + getPort() + "]";
         }
 
         private SelectionKey getKey() {

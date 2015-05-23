@@ -1,36 +1,37 @@
 package com.khovanskiy.dkvstorage.vr;
 
-import com.khovanskiy.dkvstorage.vr.message.MessageReply;
+import com.khovanskiy.dkvstorage.vr.message.ReplyMessage;
 import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
 
 /**
  * @author Victor Khovanskiy
  */
 public class ClientEntry {
-    private RequestMessage request;
-    private MessageReply reply;
+    private String result;
     private boolean processing;
+    private int clientId;
+    private int requestNumber;
 
-    public ClientEntry(RequestMessage request) {
-        this.request = request;
+    public ClientEntry(int clientId) {
+        this.clientId = clientId;
     }
 
-    public MessageReply getReply() {
-        return reply;
+    public int getRequestNumber() {
+        return requestNumber;
     }
 
-    public void setReply(MessageReply reply) {
-        this.reply = reply;
+    public void setRequestNumber(int requestNumber) {
+        this.requestNumber = requestNumber;
     }
 
-
-    public RequestMessage getRequest() {
-        return request;
+    public String getResult() {
+        return result;
     }
 
-    public void setRequest(RequestMessage request) {
-        this.request = request;
+    public void setResult(String result) {
+        this.result = result;
     }
+
 
     public boolean isProcessing() {
         return processing;

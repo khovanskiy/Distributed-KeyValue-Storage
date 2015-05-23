@@ -1,14 +1,26 @@
 package com.khovanskiy.dkvstorage.vr.operation;
 
 import com.khovanskiy.dkvstorage.vr.Replica;
-import com.khovanskiy.dkvstorage.vr.message.MessageReply;
+import com.khovanskiy.dkvstorage.vr.message.ReplyMessage;
+
+import javax.json.Json;
+import javax.json.JsonObject;
 
 /**
  * @author Victor Khovanskiy
  */
 public class SetOperation extends Operation {
-    private String key;
-    private String value;
+    public static final String TYPE = "set";
+    public static final String KEY = "key";
+    public static final String VALUE = "value";
+
+    private final String key;
+    private final String value;
+
+    public SetOperation(JsonObject jsonObject) {
+        this.key = jsonObject.getString(KEY);
+        this.value = jsonObject.getString(VALUE);
+    }
 
     public SetOperation(String key, String value) {
         this.key = key;
@@ -29,8 +41,21 @@ public class SetOperation extends Operation {
     }
 
     @Override
-    public MessageReply delegateUpCall(Replica replica) {
+    public String delegateUpCall(Replica replica) {
         replica.storage.put(key, value);
-        return new MessageReply("STORED");
+        return "STORED";
+    }
+
+    @Override
+    public String getOperationType() {
+        return TYPE;
+    }
+
+    @Override
+    protected JsonObject encode() {
+        return Json.createObjectBuilder()
+                .add(KEY, key)
+                .add(VALUE, value)
+                .build();
     }
 }

@@ -9,6 +9,8 @@ import java.text.ParseException;
 
 /**
  * @author Victor Khovanskiy
+ *
+ * @deprecated
  */
 public class MessageHandler {
     private String[] slices;
@@ -30,7 +32,7 @@ public class MessageHandler {
             }
             case "prepare": {
                 nextToken();
-                return parsePrepareMessage();
+                //return parsePrepareMessage();
             }
             case "prepareok": {
                 nextToken();
@@ -41,7 +43,7 @@ public class MessageHandler {
             case "STORED":
             case "NOT_FOUND":
             case "ACCEPTED": {
-                return parseReplyMessage();
+                //return parseReplyMessage();
             }
             default: {
                 return parseRequestMessage();
@@ -49,23 +51,23 @@ public class MessageHandler {
         }
     }
 
-    private Message parseReplyMessage() {
-        return new MessageReply(curToken());
-    }
+    /*private Message parseReplyMessage() throws ParseException {
+        return new ReplyMessage(curToken());
+    }*/
 
     private Message parsePrepareOkMessage() {
         return null;
     }
 
-    private PrepareMessage parsePrepareMessage() throws ParseException {
+    /*private PrepareMessage parsePrepareMessage() throws ParseException {
         int viewNumber = nextInt();
         RequestMessage request = parseRequestMessage();
         int opNumber = nextInt();
         int commitNumber = nextInt();
         return new PrepareMessage(viewNumber, request, opNumber, commitNumber);
-    }
+    }*/
 
-    private Message parseIdentificationMessage() {
+    private Message parseIdentificationMessage() throws ParseException {
         int id = nextInt();
         return new IdentificationMessage(id);
     }
@@ -77,23 +79,30 @@ public class MessageHandler {
         return new RequestMessage(operation, clientId, requestNumber);
     }
 
-    private int nextInt() {
-        int res = Integer.parseInt(curToken());
-        nextToken();
-        return res;
+    private int nextInt() throws ParseException {
+        try {
+            int res = Integer.parseInt(curToken());
+            nextToken();
+            return res;
+        } catch (NumberFormatException exception) {
+            throw new ParseException(exception.getMessage(), p);
+        }
     }
 
-    private String curToken() {
+    private String curToken() throws ParseException {
+        if (p >= slices.length) {
+            throw new ParseException("Too litte parts", p);
+        }
         return slices[p];
     }
 
-    private String nextToken() {
-        String res = slices[p];
+    private String nextToken() throws ParseException {
+        String res = curToken();
         ++p;
         return res;
     }
 
-    private boolean nextBoolean() {
+    private boolean nextBoolean() throws ParseException {
         boolean res = Boolean.parseBoolean(curToken());
         nextToken();
         return res;
