@@ -19,16 +19,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class Network {
 
     private final static String LINE_SEPARATOR = "\n";
-    private final Selector selector;
     private final LinkedList<Request> pendingChanges = new LinkedList<>();
     private final Map<Integer, Connection> connections = new HashMap<>();
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
-    private final ByteBuffer readBuffer = ByteBuffer.allocate(8192);
+    private final ByteBuffer readBuffer = ByteBuffer.allocate(4);
+    private final Selector selector;
     private AtomicBoolean running = new AtomicBoolean(false);
+    private ConnectionListener listener = new ConnectionListener();
     private final Runnable runnable = new Runnable() {
         @Override
         public void run() {
             while (running.get()) {
+                //System.out.println("PendingChanges");
                 synchronized (pendingChanges) {
                     while (!pendingChanges.isEmpty()) {
                         Request request = pendingChanges.poll();
@@ -36,6 +38,24 @@ public class Network {
                         switch (request.getType()) {
                             case CONNECT: {
                                 reconnect(connection);
+                            }
+                            break;
+                            case CLOSE: {
+                                if (running.compareAndSet(true, false)) {
+                                    for (SelectionKey key : selector.keys()) {
+                                        try {
+                                            key.channel().close();
+                                        } catch (IOException e) {
+                                            e.printStackTrace();
+                                        }
+                                        key.cancel();
+                                    }
+                                    try {
+                                        selector.close();
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
+                                }
                             }
                             break;
                             case CHANGEOPS: {
@@ -48,7 +68,8 @@ public class Network {
                             break;
                             case DISCONNECT: {
                                 connection.setKeepConnection(false);
-                                reconnect(connection);
+                                listener.onDisconnected(connection.getId());
+                                onDisconnected(connection);
                             }
                             break;
                         }
@@ -83,11 +104,10 @@ public class Network {
             }
         }
     };
-    private ConnectionListener listener = new ConnectionListener();
     private int nextConnectionId = 0;
 
     public Network() throws IOException {
-        this.selector = Selector.open();
+        selector = Selector.open();
     }
 
     private void onAcceptable(SelectionKey key) {
@@ -161,10 +181,40 @@ public class Network {
             return;
         }
         // TODO: improve line separation
-        String medley = new String(readBuffer.array(), 0, readCount, StandardCharsets.UTF_8);
+        /*String medley = new String(readBuffer.array(), 0, readCount, StandardCharsets.UTF_8);
         String[] lines = medley.split("\\r?\\n");
         for (String line : lines) {
             listener.onReceived(connection.getId(), line);
+        }*/
+        //readBuffer.get(new byte[], 0, 10);
+        int start = 0;
+        int length = 0;
+        byte[] bytes = readBuffer.array();
+        for (int i = 0; i < readCount; ++i) {
+            if (bytes[i] == '\n' || bytes[i] == '\r') {
+                if (length > 0) {
+                    String newPart = new String(bytes, start, length, StandardCharsets.UTF_8);
+                    listener.onReceived(connection.getId(), connection.buffer + newPart);
+                    connection.buffer = "";
+                    length = 0;
+                } else if (connection.buffer.length() > 0) {
+                    listener.onReceived(connection.getId(), connection.buffer);
+                    connection.buffer = "";
+                }
+                while (i < readCount && (bytes[i] == '\n' || bytes[i] == '\r')) {
+                    ++i;
+                }
+                if (i == readCount) {
+                    break;
+                }
+                start = i;
+                length = 1;
+            } else {
+                ++length;
+            }
+        }
+        if (length > 0) {
+            connection.buffer += new String(bytes, start, length, StandardCharsets.UTF_8);
         }
     }
 
@@ -201,8 +251,11 @@ public class Network {
     /**
      * Stops handler loop and all added connections
      */
-    public void stop() {
-        running.set(false);
+    public void stop() throws IOException {
+        synchronized (pendingChanges) {
+            pendingChanges.add(new Request(null, RequestType.CLOSE, 0));
+            selector.wakeup();
+        }
     }
 
     /**
@@ -289,7 +342,7 @@ public class Network {
     }
 
     private enum RequestType {
-        REGISTER, DISCONNECT, CONNECT, CHANGEOPS
+        REGISTER, DISCONNECT, CONNECT, CHANGEOPS, CLOSE
     }
 
     public static class ConnectionListener {
@@ -341,6 +394,7 @@ public class Network {
         private final InetSocketAddress address;
         private boolean keepConnection;
         private SelectionKey key;
+        private String buffer = "";
 
         public Connection(int connectionId, String host, int port) {
             this.id = connectionId;

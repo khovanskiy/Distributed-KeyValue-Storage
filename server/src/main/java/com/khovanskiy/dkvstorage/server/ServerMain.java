@@ -5,8 +5,11 @@ import com.khovanskiy.dkvstorage.vr.Replica;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author Victor Khovanskiy
@@ -15,6 +18,7 @@ public class ServerMain {
     private static final String DEFAULT_CONFIG_FILENAME = "dkvs.properties";
     private static final int DEFAULT_TIMEOUT = 1000;
 
+    private Map<Integer, Replica> replicas = new HashMap<>();
     private Replica current;
     private int timeout = DEFAULT_TIMEOUT;
 
@@ -47,12 +51,40 @@ public class ServerMain {
                         current = replica;
                     }
                     configuration.add(replica);
+                    replicas.put(id, replica);
                 }
             }
         }
+
         for (Replica replica : configuration) {
-            replica.start(configuration);
+            replica.start(timeout, configuration);
         }
-        //current.start(configuration);
+
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        String line = reader.readLine();
+                        System.out.println("Console: " + line);
+                        if (line == null || line.equals("q")) {
+                            System.exit(0);
+                            return;
+                        }
+                        String[] slices = line.trim().split(" +");
+                        if (slices[0].equals("kill")) {
+                            int replicaId = Integer.parseInt(slices[1]);
+                            replicas.get(replicaId).stop();
+                        } else if (slices[0].equals("start")) {
+                            int replicaId = Integer.parseInt(slices[1]);
+                            replicas.get(replicaId).start(timeout, configuration);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }).start();
     }
 }

@@ -9,20 +9,18 @@ import com.khovanskiy.dkvstorage.vr.operation.Operation;
 import com.khovanskiy.dkvstorage.vr.operation.SetOperation;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Wrapper {
     private final Replica currentReplica;
     private final Map<Integer, Integer> replicaToConnection = new HashMap<>();
-    private final Map<Integer, Replica> replicas = new HashMap<>();
-    private final Map<Integer, Client> requestToClient = new HashMap<>();
+    private final Map<Long, Client> requestToClient = new HashMap<>();
     private final Map<Integer, Client> clients = new HashMap<>();
     private final ExecutorService backgroundExecutor = Executors.newCachedThreadPool();
     private final Looper looper = new Looper();
+    private final Timer timer = new Timer();
     private final Network.ConnectionListener connectionListener = new Network.ConnectionListener() {
         @Override
         public void onConnected(int connectionId) {
@@ -59,14 +57,30 @@ public class Wrapper {
             Wrapper.this.onReceived(connectionId, line);
         }
     };
+    private final TimerTask timerTask = new TimerTask() {
+        @Override
+        public void run() {
+            looper.run(new Runnable() {
+                @Override
+                public void run() {
+                    Wrapper.this.onTimerTick();
+                }
+            });
+        }
+    };
+    private Map<Integer, Replica> replicas = new HashMap<>();
     private Network network;
-    private int requestNumber;
+    private long requestNumber;
+    private int timeout;
+    private long currentTimerTicks = 0;
 
     public Wrapper(Replica replica) {
         this.currentReplica = replica;
     }
 
-    public void start() throws IOException {
+    public void start(int timeout) throws IOException {
+        this.timeout = timeout;
+
         network = new Network();
         for (Replica anotherReplica : currentReplica.getConfiguration()) {
             if (anotherReplica.getReplicaNumber() == currentReplica.getReplicaNumber()) {
@@ -80,6 +94,14 @@ public class Wrapper {
         network.server(currentReplica.getHost(), currentReplica.getPort());
         network.start();
         backgroundExecutor.submit(looper);
+
+        // TODO
+        // timer.scheduleAtFixedRate(timerTask, 0, timeout / 2);
+    }
+
+    public void stop() throws IOException {
+        network.stop();
+        timer.cancel();
     }
 
     public void sendToReplica(int replicaId, Message message) {
@@ -91,11 +113,14 @@ public class Wrapper {
     }
 
     public void sendToClient(int clientId, ReplyMessage reply) {
-        sendToConnection(getClient(clientId).getConnectionId(), reply);
+        sendToClient(getClient(clientId), reply);
     }
 
     public void forwardReply(ReplyMessage reply) {
-        Client client = requestToClient.get(reply.getRequestNumber());
+        sendToClient(requestToClient.get(reply.getRequestNumber()), reply);
+    }
+
+    protected void sendToClient(Client client, ReplyMessage reply) {
         int connectionId = client.getConnectionId();
         if (client.isReplica()) {
             sendToConnection(connectionId, reply);
@@ -105,7 +130,7 @@ public class Wrapper {
     }
 
     public void sendToConnection(int connectionId, Message message) {
-        sendToConnection(connectionId, Message.encode(message));
+        sendToConnection(connectionId, Message.encode(message).toString());
     }
 
     protected void sendToConnection(int connectionId, String message) {
@@ -113,6 +138,10 @@ public class Wrapper {
     }
 
     public void sendToOtherReplicas(Message message) {
+        sendToOtherReplicas(Message.encode(message).toString());
+    }
+
+    protected void sendToOtherReplicas(String message) {
         for (Map.Entry<Integer, Integer> entry : replicaToConnection.entrySet()) {
             if (currentReplica.getReplicaNumber() != entry.getKey()) {
                 sendToConnection(entry.getValue(), message);
@@ -120,13 +149,46 @@ public class Wrapper {
         }
     }
 
+    private void onTimerTick() {
+        if (currentTimerTicks % 2 == 0) {
+            Map<Integer, Replica> newNodes = new HashMap<>(replicas.size());
+            for (Map.Entry<Integer, Replica> entry : replicas.entrySet()) {
+                int connectionId = entry.getKey();
+                Replica replica = entry.getValue();
+                if (Math.abs(currentTimerTicks - replica.getLastTick()) > 1) {
+                    Utils.log(currentReplica.getReplicaNumber(), "Force disconnect from " + network.dump(connectionId));
+                    network.disconnect(connectionId);
+
+                    int newConnectionId = network.connect(replica.getHost(), replica.getPort(), true);
+
+                    newNodes.put(newConnectionId, replica);
+                    replicaToConnection.put(replica.getReplicaNumber(), newConnectionId);
+                } else {
+                    newNodes.put(connectionId, replica);
+                }
+            }
+            replicas = newNodes;
+        }
+
+        sendToOtherReplicas("ping");
+        ++currentTimerTicks;
+    }
+
     private void onConnected(int connectionId) {
         Utils.log(currentReplica.getReplicaNumber(), "Connected to remote " + network.dump(connectionId));
         sendToConnection(connectionId, "node " + currentReplica.getReplicaNumber());
+        Replica replica = replicas.get(connectionId);
+        replica.setLastTick(currentTimerTicks);
     }
 
     private void onDisconnected(int connectionId) {
         System.out.println("Disconnected " + network.dump(connectionId));
+        Replica replica = replicas.get(connectionId);
+        if (replica != null) {
+            if (currentReplica.getPrimaryNumber() == replica.getReplicaNumber()) {
+                currentReplica.onPrimaryDisconnected();
+            }
+        }
     }
 
     private void onAccepted(int connectionId) {
@@ -143,6 +205,7 @@ public class Wrapper {
             Message message = Message.decode(line);
             message.delegateProcessing(currentReplica);
         } catch (Exception e) {
+            System.out.println("Parse error + " + line);
             e.printStackTrace();
         }
     }
@@ -186,7 +249,14 @@ public class Wrapper {
             case "pong":
                 if (slices.length != 1)
                     return false;
+                processPong(connectionId);
                 return true;
+            case "primary": {
+                if (slices.length != 1)
+                    return false;
+                sendToConnection(connectionId, "leader = " + currentReplica.getPrimaryNumber());
+                return true;
+            }
             case "accepted":
                 return true;
         }
@@ -202,16 +272,6 @@ public class Wrapper {
         client.setConnectionId(connectionId);
         client.markAsReplica();
         sendToConnection(connectionId, "ACCEPTED");
-        /*if (incoming.contains(connectionId)) {
-            incoming.remove(connectionId);
-            Integer oldConnectionId = incomingReplicas.get(identification.getId());
-            if (oldConnectionId != null) {
-                incomingReplicas.remove(identification.getId());
-                network.disconnect(oldConnectionId);
-            }
-            incomingReplicas.put(identification.getId(), connectionId);
-            //sendTo(connectionId, new ReplyMessage("ACCEPTED"));
-        }*/
     }
 
     private void processClientRequest(Operation operation, int connectionId) {
@@ -229,7 +289,19 @@ public class Wrapper {
     }
 
     private void processPing(int connectionId) {
+        /*if (currentReplica.getReplicaNumber() == 1) {
+            if (currentTimerTicks > 3 && currentTimerTicks < 10 || currentTimerTicks > 30 && currentTimerTicks < 50){
+                return;
+            }
+        }*/
         sendToConnection(connectionId, "pong");
+    }
+
+    private void processPong(int connectionId) {
+        Replica replica = replicas.get(connectionId);
+        if (replica != null) {
+            replica.setLastTick(currentTimerTicks);
+        }
     }
 
     private Client getClient(int clientId) {
@@ -241,9 +313,30 @@ public class Wrapper {
         return client;
     }
 
+    private class Node {
+        private int nodeId;
+        private long lastTick;
+
+        public Node(int nodeid) {
+            this.nodeId = nodeid;
+        }
+
+        public int getNodeId() {
+            return this.nodeId;
+        }
+
+        public long getLastTick() {
+            return this.lastTick;
+        }
+
+        public void setLastTick(long lastTick) {
+            this.lastTick = lastTick;
+        }
+    }
+
     private class Client {
-        public int clientId;
-        public int requestNumber;
+        private int clientId;
+        private int requestNumber;
         private int connectionId;
         private boolean hasConnectionId = false;
         private boolean isReplica = false;
@@ -269,12 +362,12 @@ public class Wrapper {
             return this.hasConnectionId;
         }
 
-        public void setConnectionId(int connectionId) {
-            this.connectionId = connectionId;
-        }
-
         public int getConnectionId() {
             return this.connectionId;
+        }
+
+        public void setConnectionId(int connectionId) {
+            this.connectionId = connectionId;
         }
     }
 }

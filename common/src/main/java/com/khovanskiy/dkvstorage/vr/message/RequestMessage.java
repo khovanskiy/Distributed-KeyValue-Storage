@@ -18,15 +18,15 @@ public class RequestMessage extends Message {
 
     private final Operation operation;
     private final int clientId;
-    private final int requestNumber;
+    private final long requestNumber;
 
     public RequestMessage(JsonObject jsonObject) {
-        this.operation = Operation.decode(jsonObject.getString(OPERATION));
+        this.operation = Operation.decode(jsonObject.getJsonObject(OPERATION));
         this.clientId = jsonObject.getInt(CLIENT_ID);
-        this.requestNumber = jsonObject.getJsonNumber(REQUEST_NUMBER).intValue();
+        this.requestNumber = jsonObject.getJsonNumber(REQUEST_NUMBER).longValue();
     }
 
-    public RequestMessage(Operation operation, int clientId, int requestNumber) {
+    public RequestMessage(Operation operation, int clientId, long requestNumber) {
         this.operation = operation;
         this.clientId = clientId;
         this.requestNumber = requestNumber;
@@ -55,7 +55,7 @@ public class RequestMessage extends Message {
      *
      * @return
      */
-    public int getRequestNumber() {
+    public long getRequestNumber() {
         return requestNumber;
     }
 

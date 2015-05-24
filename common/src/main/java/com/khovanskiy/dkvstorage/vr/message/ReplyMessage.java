@@ -14,8 +14,8 @@ public class ReplyMessage extends Message {
     public static final String VIEW_NUMBER = "viewNumber";
     public static final String REQUEST_NUMBER = "requestNumber";
     public static final String OPERATION_RESULT = "result";
-    private final int viewNumber;
-    private final int requestNumber;
+    private final long viewNumber;
+    private final long requestNumber;
 
     public String getResult() {
         return result;
@@ -29,13 +29,13 @@ public class ReplyMessage extends Message {
         result = jsonObject.getString(OPERATION_RESULT);
     }
 
-    public ReplyMessage(int viewNumber, int requestNumber, String result) {
+    public ReplyMessage(long viewNumber, long requestNumber, String result) {
         this.viewNumber = viewNumber;
         this.requestNumber = requestNumber;
         this.result = result;
     }
 
-    public int getRequestNumber() {
+    public long getRequestNumber() {
         return requestNumber;
     }
 

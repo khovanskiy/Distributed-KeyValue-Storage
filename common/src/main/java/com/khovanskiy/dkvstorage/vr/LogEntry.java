@@ -16,4 +16,6 @@ public class LogEntry {
     public LogEntry(RequestMessage request) {
         this.request = request;
     }
+
+
 }

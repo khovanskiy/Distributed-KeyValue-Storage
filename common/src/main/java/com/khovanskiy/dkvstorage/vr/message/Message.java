@@ -16,17 +16,20 @@ public abstract class Message {
     private static final String MESSAGE_TYPE = "type";
     private static final String MESSAGE_CONTENT = "content";
 
-    public static String encode(Message message) {
+    public static JsonObject encode(Message message) {
         return Json.createObjectBuilder()
                 .add(Message.MESSAGE_TYPE, message.getMessageType())
                 .add(Message.MESSAGE_CONTENT, message.encode())
-                .build().toString();
+                .build();
     }
 
-    public static Message decode(String json) {
-        JsonReader jsonReader = Json.createReader(new StringReader(json));
+    public static Message decode(String jsonString) {
+        JsonReader jsonReader = Json.createReader(new StringReader(jsonString));
         JsonObject jsonObject = jsonReader.readObject();
+        return decode(jsonObject);
+    }
 
+    public static Message decode(JsonObject jsonObject) {
         JsonString type = jsonObject.getJsonString(Message.MESSAGE_TYPE);
         JsonObject content = jsonObject.getJsonObject(Message.MESSAGE_CONTENT);
 
@@ -37,10 +40,14 @@ public abstract class Message {
                 return new PrepareMessage(content);
             case PrepareOkMessage.TYPE:
                 return new PrepareOkMessage(content);
-            /*case CommitMessage.ID:
-                return new CommitMessage(messageBody);
-            case StartViewChangeMessage.ID:
-                return new StartViewChangeMessage(messageBody);*/
+            case CommitMessage.TYPE:
+                return new CommitMessage(content);
+            case StartViewChangeMessage.TYPE:
+                return new StartViewChangeMessage(content);
+            case DoViewChangeMessage.TYPE:
+                return new DoViewChangeMessage(content);
+            case StartViewMessage.TYPE:
+                return new StartViewMessage(content);
             case ReplyMessage.TYPE:
                 return new ReplyMessage(content);
         }

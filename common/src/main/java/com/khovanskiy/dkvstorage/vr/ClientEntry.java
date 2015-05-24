@@ -10,17 +10,17 @@ public class ClientEntry {
     private String result;
     private boolean processing;
     private int clientId;
-    private int requestNumber;
+    private long requestNumber;
 
     public ClientEntry(int clientId) {
         this.clientId = clientId;
     }
 
-    public int getRequestNumber() {
+    public long getRequestNumber() {
         return requestNumber;
     }
 
-    public void setRequestNumber(int requestNumber) {
+    public void setRequestNumber(long requestNumber) {
         this.requestNumber = requestNumber;
     }
 

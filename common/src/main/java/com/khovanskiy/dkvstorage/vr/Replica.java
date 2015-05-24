@@ -1,10 +1,6 @@
 package com.khovanskiy.dkvstorage.vr;
 
-import com.khovanskiy.dkvstorage.vr.message.Message;
-import com.khovanskiy.dkvstorage.vr.message.ReplyMessage;
-import com.khovanskiy.dkvstorage.vr.message.PrepareMessage;
-import com.khovanskiy.dkvstorage.vr.message.PrepareOkMessage;
-import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
+import com.khovanskiy.dkvstorage.vr.message.*;
 import com.khovanskiy.dkvstorage.vr.operation.Operation;
 import com.sun.istack.internal.NotNull;
 
@@ -22,14 +18,20 @@ public class Replica {
     /**
      * This is an array containing op-number entries. The entries contain the requests that have been received so far in their assigned order.
      */
-    private final Map<Integer, LogEntry> log = new HashMap<>();
+    private ReplicaLog log = new ReplicaLog();
     /**
      * This records for each client the number of its most recent request, plus, if the request has been executed, the result sent for that request.
      */
     private final Map<Integer, ClientEntry> clientTable = new HashMap<>();
-    private final Map<Integer, Map<Integer, Boolean>> ballotTable = new HashMap<>();
+    private final Map<Long, Map<Integer, Boolean>> ballotRequestTable = new HashMap<>();
     private final String host;
     private final int port;
+    private final Map<Integer, Map<Integer, Boolean>> ballotPrimaryTable = new HashMap<>();
+    private final ViewChangeState viewChangeState = new ViewChangeState(this);
+    private final Wrapper wrapper = new Wrapper(this);
+    /**
+     * Local key-value storage
+     */
     public Map<String, String> storage = new HashMap<>();
     /**
      * This is a sorted array containing the 2f + 1 replicas.
@@ -38,7 +40,7 @@ public class Replica {
     /**
      * The current view-number, initially 0.
      */
-    private int viewNumber = 0;
+    private long viewNumber = 0;
     /**
      * The current status, either @code{ReplicaStatus.NORMAL}, @code{ReplicaStatus.VIEW_CHANGE}, or @code{ReplicaStatus.RECOVERING}
      */
@@ -46,15 +48,14 @@ public class Replica {
     /**
      * This is assigned to the most recently received request, initially 0.
      */
-    private int opNumber = 0;
+    private long operationNumber = 0;
     /**
      * This is the op-number of the most recently committed operation.
      */
-    private int commitNumber;
+    private long commitNumber;
     private int quorumSize;
     private int primaryNumber;
-
-    private Wrapper wrapper = new Wrapper(this);
+    private long lastTick;
 
     public Replica(int replicaNumber, String host, int port) throws IOException {
         this.replicaNumber = replicaNumber;
@@ -62,29 +63,78 @@ public class Replica {
         this.port = port;
     }
 
+    public long getOperationNumber() {
+        return operationNumber;
+    }
+
+    public void setOperationNumber(long operationNumber) {
+        this.operationNumber = operationNumber;
+    }
+
+    public long getCommitNumber() {
+        return commitNumber;
+    }
+
+    public void setCommitNumber(long commitNumber) {
+        this.commitNumber = commitNumber;
+    }
+
+    public Wrapper getWrapper() {
+        return wrapper;
+    }
+
+    public void setLog(ReplicaLog log) {
+        this.log = log;
+    }
+
+    public ReplicaLog getLog() {
+        return log;
+    }
+
+    public long getViewNumber() {
+        return viewNumber;
+    }
+
+    public void setViewNumber(long viewNumber) {
+        this.viewNumber = viewNumber;
+    }
+
+    public ReplicaStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(ReplicaStatus status) {
+        this.status = status;
+    }
+
     public int getReplicaNumber() {
         return replicaNumber;
     }
 
-    public void start(List<Replica> configuration) throws IOException {
+    public void start(int timeout, List<Replica> configuration) throws IOException {
         trace("Replica " + toString() + " starting...");
+        this.configuration = configuration;
         this.quorumSize = configuration.size() / 2 + 1;
         this.status = ReplicaStatus.NORMAL;
         this.primaryNumber = configuration.get(0).getReplicaNumber();
-        this.configuration = configuration;
-        wrapper.start();
+        wrapper.start(timeout);
+    }
+
+    public void stop() throws IOException {
+        trace("Replica " + toString() + " stopping...");
+        wrapper.stop();
     }
 
     private void trace(String s) {
         System.out.println("{REPLICA " + getReplicaNumber() + "} = " + s);
     }
 
-
     @NotNull
     private ClientEntry getClient(int clientId) {
         ClientEntry entry = clientTable.get(clientId);
         if (entry == null) {
             entry = new ClientEntry(clientId);
+            clientTable.put(clientId, entry);
         }
         return entry;
     }
@@ -114,20 +164,20 @@ public class Replica {
         }
 
         // advances op-number
-        opNumber++;
+        operationNumber++;
 
         // adds the request to the end of the log
-        log.put(opNumber, new LogEntry(request));
+        log.put(operationNumber, request);
 
         // updates the information for this client in the client-table to contain the new request number
         entry.setRequestNumber(request.getRequestNumber());
         entry.setProcessing(true);
 
         // prepare table for ballot by voting backups
-        ballotTable.put(opNumber, new HashMap<>());
+        ballotRequestTable.put(operationNumber, new HashMap<>());
 
         // sends a <PREPARE v, m, n, k> message to the other replicas
-        Message prepare = new PrepareMessage(request, viewNumber, opNumber, commitNumber);
+        Message prepare = new PrepareMessage(request, viewNumber, operationNumber, commitNumber);
         wrapper.sendToOtherReplicas(prepare);
     }
 
@@ -143,13 +193,13 @@ public class Replica {
             return;
         }
 
-        if (prepare.getOpNumber() > opNumber + 1) {
+        if (prepare.getOperationNumber() > operationNumber + 1) {
             //go s.StartRecovery()
             return;
         }
 
         // Ignore out-of-order message
-        if (prepare.getOpNumber() < opNumber + 1) {
+        if (prepare.getOperationNumber() < operationNumber + 1) {
             return;
         }
 
@@ -157,51 +207,53 @@ public class Replica {
         commitUpTo(prepare.getCommitNumber());
 
         //increments its op-number
-        opNumber++;
+        operationNumber++;
 
         // adds the request to the end of its log
-        log.put(opNumber, new LogEntry(prepare.getRequest()));
+        log.put(operationNumber, prepare.getRequest());
 
         //  updates the client's information in the client-table
         ClientEntry entry = getClient(prepare.getRequest().getClientId());
         entry.setRequestNumber(prepare.getRequest().getRequestNumber());
 
         // and sends a [PREPAREOK v, n, i] message to the primary to indicate that this operation and all earlier ones have prepared locally.
-        PrepareOkMessage prepareOk = new PrepareOkMessage(viewNumber, opNumber, getReplicaNumber());
+        PrepareOkMessage prepareOk = new PrepareOkMessage(viewNumber, operationNumber, getReplicaNumber());
         wrapper.sendToPrimary(prepareOk);
     }
 
     public void onReceivedPrepareOk(PrepareOkMessage prepareOk) {
         // Ignore committed operations
-        if (prepareOk.getOpNumber() <= commitNumber) {
+        if (prepareOk.getOperationNumber() <= commitNumber) {
             return;
         }
 
         // Update table for PrepareOK messages
-        Map<Integer, Boolean> ballot = ballotTable.get(prepareOk.getOpNumber());
+        Map<Integer, Boolean> ballot = ballotRequestTable.get(prepareOk.getOperationNumber());
         if (ballot == null) {
             return;
         }
-        ballot.put(prepareOk.getBackupNumber(), true);
+        ballot.put(prepareOk.getReplicaNumber(), true);
 
         // Commit operations agreed by quorum
-        if (prepareOk.getOpNumber() > commitNumber + 1) {
+        if (prepareOk.getOperationNumber() > commitNumber + 1) {
             return;
         }
 
-        while (commitNumber < opNumber) {
-            ballot = ballotTable.get(commitNumber + 1);
+        boolean changed = false;
+        while (commitNumber < operationNumber) {
+            ballot = ballotRequestTable.get(commitNumber + 1);
             int f = ballot.size();
             // The primary waits for f PREPAREOK messages from different backups;
-            if (f >= quorumSize) {
+            if (f >= configuration.size() / 2) {
                 // at this point it considers the operation (and all earlier ones) to be committed.
-                RequestMessage request = log.get(commitNumber + 1).getRequest();
+                RequestMessage request = log.get(commitNumber + 1);
 
                 // Then, after it has executed all earlier operations (those assigned smaller op-numbers), the primary executes the operation by making an up-call
                 String result = upCall(request.getOperation());
 
                 // and increments its commit-number.
                 ++commitNumber;
+                changed = true;
 
                 // The primary also updates the client's entry in the client-table to contain the result.
                 ClientEntry entry = getClient(request.getClientId());
@@ -212,11 +264,25 @@ public class Replica {
                 ReplyMessage reply = new ReplyMessage(viewNumber, request.getRequestNumber(), entry.getResult());
                 wrapper.sendToClient(request.getClientId(), reply);
 
-                ballotTable.remove(commitNumber);
+                ballotRequestTable.remove(commitNumber);
             } else {
                 break;
             }
         }
+
+        // informs the backups of the latest commit by sending them a [COMMIT v, k] message
+        if (changed) {
+            wrapper.sendToOtherReplicas(new CommitMessage(viewNumber, commitNumber));
+        }
+    }
+
+    public void onReceivedCommit(CommitMessage commit) {
+        // Ignore committed operations
+        if (commit.getCommitNumber() <= commitNumber) {
+            return;
+        }
+
+        commitUpTo(commit.getCommitNumber());
     }
 
     public void onReceivedReply(ReplyMessage reply) {
@@ -224,15 +290,15 @@ public class Replica {
     }
 
     private void executeNextOp() {
-        RequestMessage request = log.get(commitNumber + 1).getRequest();
+        RequestMessage request = log.get(commitNumber + 1);
         ClientEntry entry = getClient(request.getClientId());
         entry.setResult(upCall(request.getOperation()));
         entry.setProcessing(false);
         ++commitNumber;
     }
 
-    private void commitUpTo(int primaryCommit) {
-        while (commitNumber < primaryCommit && commitNumber < opNumber) {
+    private void commitUpTo(long primaryCommit) {
+        while (commitNumber < primaryCommit && commitNumber < operationNumber) {
             executeNextOp();
         }
     }
@@ -242,12 +308,40 @@ public class Replica {
         return operation.delegateUpCall(this);
     }
 
+    public void onPrimaryDisconnected() {
+        Utils.log(getReplicaNumber(), "Notice that primary disconnected");
+        // notices the need for a view change advances its view-number
+        viewChangeState.startViewChange();
+        /*long newViewNumber = getViewNumber() + 1;
+        if (status == ReplicaStatus.RECOVERING) {
+            return;
+        }
+        if (status == ReplicaStatus.NORMAL) {
+            setStatus(ReplicaStatus.VIEW_CHANGE);
+            viewChangeState.reset(newViewNumber);
+            wrapper.sendToOtherReplicas(new StartViewChangeMessage(newViewNumber, getReplicaNumber()));
+        }*/
+    }
+
+    public void onReceivedStartViewChange(StartViewChangeMessage event) {
+        viewChangeState.processViewChangeMessage(event);
+    }
+
+    public void onReceivedDoViewChange(DoViewChangeMessage event) {
+        viewChangeState.processDoViewChangeMessage(event);
+    }
+
+    public void onReceivedStartView(StartViewMessage event) {
+        viewChangeState.processStartViewMessage(event);
+    }
+
     public boolean isPrimary() {
         return getReplicaNumber() == getPrimaryNumber();
     }
 
     public int getPrimaryNumber() {
-        return primaryNumber;
+        int offset = (int)(viewNumber % configuration.size());
+        return configuration.get(offset).getReplicaNumber();
     }
 
     public String getHost() {
@@ -265,6 +359,14 @@ public class Replica {
 
     public List<Replica> getConfiguration() {
         return configuration;
+    }
+
+    public long getLastTick() {
+        return lastTick;
+    }
+
+    public void setLastTick(long lastTick) {
+        this.lastTick = lastTick;
     }
 
     private class Client {

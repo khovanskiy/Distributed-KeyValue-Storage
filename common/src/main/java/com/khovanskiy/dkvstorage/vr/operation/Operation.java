@@ -17,17 +17,14 @@ public abstract class Operation {
 
     public static final String OPERATION_CONTENT = "content";
 
-    public static String encode(Operation operation) {
+    public static JsonObject encode(Operation operation) {
         return Json.createObjectBuilder()
                 .add(Operation.OPERATION_TYPE, operation.getOperationType())
                 .add(Operation.OPERATION_CONTENT, operation.encode())
-                .build().toString();
+                .build();
     }
 
-    public static Operation decode(String json) {
-        JsonReader jsonReader = Json.createReader(new StringReader(json));
-        JsonObject jsonObject = jsonReader.readObject();
-
+    public static Operation decode(JsonObject jsonObject) {
         JsonString type = jsonObject.getJsonString(Operation.OPERATION_TYPE);
         JsonObject content = jsonObject.getJsonObject(Operation.OPERATION_CONTENT);
 

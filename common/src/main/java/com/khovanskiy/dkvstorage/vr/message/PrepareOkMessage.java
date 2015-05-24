@@ -11,36 +11,36 @@ import javax.json.JsonObject;
 public class PrepareOkMessage extends Message {
 
     public static final String TYPE = "prepareOk";
-    public static final String VIEW_NUMBER = "ViewNumber";
-    public static final String OPERATION_NUMBER = "OperationNumber";
-    public static final String NODE_NUMBER = "NodeNumber";
+    public static final String VIEW_NUMBER = "viewNumber";
+    public static final String OPERATION_NUMBER = "operationNumber";
+    public static final String REPLICA_NUMBER = "replica";
 
-    public int getViewNumber() {
+    public long getViewNumber() {
         return viewNumber;
     }
 
-    public int getOpNumber() {
-        return opNumber;
+    public long getOperationNumber() {
+        return operationNumber;
     }
 
-    public int getBackupNumber() {
-        return backupNumber;
+    public int getReplicaNumber() {
+        return replicaNumber;
     }
 
-    private int viewNumber;
-    private int opNumber;
-    private int backupNumber;
+    private long viewNumber;
+    private long operationNumber;
+    private int replicaNumber;
 
     public PrepareOkMessage(JsonObject jsonObject) {
-        this.viewNumber = jsonObject.getJsonNumber(VIEW_NUMBER).intValue();
-        this.opNumber = jsonObject.getJsonNumber(OPERATION_NUMBER).intValue();
-        this.backupNumber = jsonObject.getInt(NODE_NUMBER);
+        this.viewNumber = jsonObject.getJsonNumber(VIEW_NUMBER).longValue();
+        this.operationNumber = jsonObject.getJsonNumber(OPERATION_NUMBER).longValue();
+        this.replicaNumber = jsonObject.getInt(REPLICA_NUMBER);
     }
 
-    public PrepareOkMessage(int viewNumber, int opNumber, int backupNumber) {
+    public PrepareOkMessage(long viewNumber, long operationNumber, int replicaNumber) {
         this.viewNumber = viewNumber;
-        this.opNumber = opNumber;
-        this.backupNumber = backupNumber;
+        this.operationNumber = operationNumber;
+        this.replicaNumber = replicaNumber;
     }
 
     @Override
@@ -57,8 +57,8 @@ public class PrepareOkMessage extends Message {
     protected JsonObject encode() {
         return Json.createObjectBuilder()
                 .add(VIEW_NUMBER, viewNumber)
-                .add(OPERATION_NUMBER, opNumber)
-                .add(NODE_NUMBER, backupNumber)
+                .add(OPERATION_NUMBER, operationNumber)
+                .add(REPLICA_NUMBER, replicaNumber)
                 .build();
     }
 }
