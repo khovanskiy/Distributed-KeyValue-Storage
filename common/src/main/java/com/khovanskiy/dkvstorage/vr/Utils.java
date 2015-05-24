@@ -8,11 +8,15 @@ import com.khovanskiy.dkvstorage.vr.operation.Operation;
 import com.khovanskiy.dkvstorage.vr.operation.SetOperation;
 
 import java.text.ParseException;
+import java.util.Random;
 
 /**
  * @author Victor Khovanskiy
  */
 public class Utils {
+
+    private final static Random random = new Random();
+
     public static int parseInt(String s, int d) {
         try {
             return Integer.parseInt(s);
@@ -23,6 +27,10 @@ public class Utils {
 
     public static void log(int i, String s) {
         System.out.println("{REPLICA " + i + "} = " + s);
+    }
+
+    public static long timeStamp() {
+        return random.nextLong();
     }
 
     public static int parseInt(String s) {

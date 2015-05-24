@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
+ * Implementation of ViewChange protocol
+ *
  * @author Victor Khovanskiy
  */
 public class ViewChangeState {

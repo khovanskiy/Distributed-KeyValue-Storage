@@ -158,6 +158,10 @@ public class Network {
         } catch (IOException ignored) {
         }
         key.cancel();
+        Queue<ByteBuffer> queue = connection.getQueue();
+        synchronized (queue) {
+            queue.clear();
+        }
         if (connection.isKeepConnection()) {
             reconnect(connection);
         }
@@ -266,6 +270,7 @@ public class Network {
      */
     public void send(int connectionId, String line) {
         Connection connection = getConnection(connectionId);
+
         Queue<ByteBuffer> queue = connection.getQueue();
         synchronized (queue) {
             queue.add(ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8)));

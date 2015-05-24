@@ -25,7 +25,7 @@ public class ClientMain {
     private void execute() throws IOException {
         Network network = new Network();
 
-        int serverConnection = network.connect("localhost", 444, true);
+        int serverConnection = network.connect("localhost", 111, true);
         network.setConnectionListener(new Network.ConnectionListener() {
             @Override
             public void onConnected(int connectionId) {

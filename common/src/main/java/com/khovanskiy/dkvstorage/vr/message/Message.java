@@ -48,6 +48,10 @@ public abstract class Message {
                 return new DoViewChangeMessage(content);
             case StartViewMessage.TYPE:
                 return new StartViewMessage(content);
+            case RecoveryMessage.TYPE:
+                return new RecoveryMessage(content);
+            case RecoveryResponseMessage.TYPE:
+                return new RecoveryResponseMessage(content);
             case ReplyMessage.TYPE:
                 return new ReplyMessage(content);
         }

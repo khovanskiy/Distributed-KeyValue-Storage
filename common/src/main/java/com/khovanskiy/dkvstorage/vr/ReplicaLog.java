@@ -14,6 +14,9 @@ import java.util.Map;
 public class ReplicaLog extends HashMap<Long, RequestMessage> {
 
     public static ReplicaLog decode(String json) {
+        if (json.length() == 0) {
+            return null;
+        }
         JsonReader jsonReader = Json.createReader(new StringReader(json));
         JsonObject jsonObject = jsonReader.readObject();
 

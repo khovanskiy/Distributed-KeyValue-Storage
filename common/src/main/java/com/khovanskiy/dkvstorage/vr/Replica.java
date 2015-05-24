@@ -16,10 +16,6 @@ public class Replica {
      */
     private final int replicaNumber;
     /**
-     * This is an array containing op-number entries. The entries contain the requests that have been received so far in their assigned order.
-     */
-    private ReplicaLog log = new ReplicaLog();
-    /**
      * This records for each client the number of its most recent request, plus, if the request has been executed, the result sent for that request.
      */
     private final Map<Integer, ClientEntry> clientTable = new HashMap<>();
@@ -28,11 +24,16 @@ public class Replica {
     private final int port;
     private final Map<Integer, Map<Integer, Boolean>> ballotPrimaryTable = new HashMap<>();
     private final ViewChangeState viewChangeState = new ViewChangeState(this);
+    private final RecoveryState recoveryState = new RecoveryState(this);
     private final Wrapper wrapper = new Wrapper(this);
     /**
      * Local key-value storage
      */
     public Map<String, String> storage = new HashMap<>();
+    /**
+     * This is an array containing op-number entries. The entries contain the requests that have been received so far in their assigned order.
+     */
+    private ReplicaLog log = new ReplicaLog();
     /**
      * This is a sorted array containing the 2f + 1 replicas.
      */
@@ -83,12 +84,12 @@ public class Replica {
         return wrapper;
     }
 
-    public void setLog(ReplicaLog log) {
-        this.log = log;
-    }
-
     public ReplicaLog getLog() {
         return log;
+    }
+
+    public void setLog(ReplicaLog log) {
+        this.log = log;
     }
 
     public long getViewNumber() {
@@ -120,9 +121,18 @@ public class Replica {
         wrapper.start(timeout);
     }
 
+    private void clear() {
+        this.viewNumber = 0;
+        this.commitNumber = 0;
+        this.operationNumber = 0;
+        this.status = ReplicaStatus.NORMAL;
+        this.log.clear();
+    }
+
     public void stop() throws IOException {
         trace("Replica " + toString() + " stopping...");
         wrapper.stop();
+        clear();
     }
 
     private void trace(String s) {
@@ -181,40 +191,44 @@ public class Replica {
         wrapper.sendToOtherReplicas(prepare);
     }
 
-    public void onReceivedPrepare(PrepareMessage prepare) {
-        if (prepare.getViewNumber() > viewNumber) {
-            //If this node also thinks it is a primary, will do recovery
-            //go s.StartRecovery()
+    public void onReceivedPrepare(PrepareMessage message) {
+        // Replica state is not NORMAL. Ignoring PREPARE
+        if (getStatus() != ReplicaStatus.NORMAL) {
+            return;
+        }
+
+        if (message.getViewNumber() > viewNumber) {
+            recoveryState.startRecovery();
+            return;
+        }
+
+        if (message.getOperationNumber() > operationNumber + 1) {
+            recoveryState.startRecovery();
             return;
         }
 
         // TODO: Handle msg from older views
-        if (prepare.getViewNumber() < viewNumber) {
-            return;
-        }
-
-        if (prepare.getOperationNumber() > operationNumber + 1) {
-            //go s.StartRecovery()
+        if (message.getViewNumber() < viewNumber) {
             return;
         }
 
         // Ignore out-of-order message
-        if (prepare.getOperationNumber() < operationNumber + 1) {
+        if (message.getOperationNumber() < operationNumber + 1) {
             return;
         }
 
         // won’t accept a prepare with op-number n until it has entries for all earlier requests in its log.
-        commitUpTo(prepare.getCommitNumber());
+        commitUpTo(message.getCommitNumber());
 
         //increments its op-number
         operationNumber++;
 
         // adds the request to the end of its log
-        log.put(operationNumber, prepare.getRequest());
+        log.put(operationNumber, message.getRequest());
 
         //  updates the client's information in the client-table
-        ClientEntry entry = getClient(prepare.getRequest().getClientId());
-        entry.setRequestNumber(prepare.getRequest().getRequestNumber());
+        ClientEntry entry = getClient(message.getRequest().getClientId());
+        entry.setRequestNumber(message.getRequest().getRequestNumber());
 
         // and sends a [PREPAREOK v, n, i] message to the primary to indicate that this operation and all earlier ones have prepared locally.
         PrepareOkMessage prepareOk = new PrepareOkMessage(viewNumber, operationNumber, getReplicaNumber());
@@ -222,6 +236,11 @@ public class Replica {
     }
 
     public void onReceivedPrepareOk(PrepareOkMessage prepareOk) {
+        // Replica state is not NORMAL. Ignoring PREPARE_OK
+        if (getStatus() != ReplicaStatus.NORMAL) {
+            return;
+        }
+
         // Ignore committed operations
         if (prepareOk.getOperationNumber() <= commitNumber) {
             return;
@@ -276,13 +295,23 @@ public class Replica {
         }
     }
 
-    public void onReceivedCommit(CommitMessage commit) {
-        // Ignore committed operations
-        if (commit.getCommitNumber() <= commitNumber) {
+    public void onReceivedCommit(CommitMessage message) {
+        // Replica state is not NORMAL. Ignoring COMMIT
+        if (getStatus() != ReplicaStatus.NORMAL) {
             return;
         }
 
-        commitUpTo(commit.getCommitNumber());
+        if (message.getViewNumber() > viewNumber) {
+            recoveryState.startRecovery();
+            return;
+        }
+
+        // Ignore committed operations
+        if (message.getCommitNumber() <= commitNumber) {
+            return;
+        }
+
+        commitUpTo(message.getCommitNumber());
     }
 
     public void onReceivedReply(ReplyMessage reply) {
@@ -323,16 +352,24 @@ public class Replica {
         }*/
     }
 
-    public void onReceivedStartViewChange(StartViewChangeMessage event) {
-        viewChangeState.processViewChangeMessage(event);
+    public void onReceivedStartViewChange(StartViewChangeMessage message) {
+        viewChangeState.processViewChangeMessage(message);
     }
 
-    public void onReceivedDoViewChange(DoViewChangeMessage event) {
-        viewChangeState.processDoViewChangeMessage(event);
+    public void onReceivedDoViewChange(DoViewChangeMessage message) {
+        viewChangeState.processDoViewChangeMessage(message);
     }
 
-    public void onReceivedStartView(StartViewMessage event) {
-        viewChangeState.processStartViewMessage(event);
+    public void onReceivedStartView(StartViewMessage message) {
+        viewChangeState.processStartViewMessage(message);
+    }
+
+    public void onReceivedRecovery(RecoveryMessage message) {
+        recoveryState.processRecoveryMessage(message);
+    }
+
+    public void onReceivedRecoveryResponse(RecoveryResponseMessage message) {
+        recoveryState.processRecoveryResponseMessage(message);
     }
 
     public boolean isPrimary() {
@@ -340,7 +377,7 @@ public class Replica {
     }
 
     public int getPrimaryNumber() {
-        int offset = (int)(viewNumber % configuration.size());
+        int offset = (int) (viewNumber % configuration.size());
         return configuration.get(offset).getReplicaNumber();
     }
 
