@@ -184,13 +184,6 @@ public class Network {
             onDisconnected(connection);
             return;
         }
-        // TODO: improve line separation
-        /*String medley = new String(readBuffer.array(), 0, readCount, StandardCharsets.UTF_8);
-        String[] lines = medley.split("\\r?\\n");
-        for (String line : lines) {
-            listener.onReceived(connection.getId(), line);
-        }*/
-        //readBuffer.get(new byte[], 0, 10);
         int start = 0;
         int length = 0;
         byte[] bytes = readBuffer.array();

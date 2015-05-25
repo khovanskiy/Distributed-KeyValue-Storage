@@ -99,7 +99,7 @@ public class Wrapper {
         backgroundExecutor.submit(looper);
 
         // TODO make more smart solution
-        //timer.scheduleAtFixedRate(timerTask, 0, timeout / 2);
+        timer.scheduleAtFixedRate(timerTask, 0, timeout / 2);
     }
 
     public void stop() throws IOException {

@@ -175,7 +175,7 @@ public class Replica {
         // However, if the primary does not receive a new client request in a timely way
         if (isPrimary()) {
             // it instead informs the backups of the latest commit by sending them a [COMMIT v, k] message
-            //wrapper.sendToOtherReplicas(new CommitMessage(getViewNumber(), getCommitNumber()));
+            wrapper.sendToOtherReplicas(new CommitMessage(getViewNumber(), getCommitNumber()));
         }
     }
 
