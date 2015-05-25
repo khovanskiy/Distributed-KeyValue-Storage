@@ -1,4 +1,4 @@
-package com.khovanskiy.dkvstorage.vr;
+package com.khovanskiy.dkvstorage.vr.replica;
 
 import com.khovanskiy.dkvstorage.vr.message.Message;
 import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
@@ -14,9 +14,6 @@ import java.util.Map;
 public class ReplicaLog extends HashMap<Long, RequestMessage> {
 
     public static ReplicaLog decode(String json) {
-        if (json.length() == 0) {
-            return null;
-        }
         JsonReader jsonReader = Json.createReader(new StringReader(json));
         JsonObject jsonObject = jsonReader.readObject();
 

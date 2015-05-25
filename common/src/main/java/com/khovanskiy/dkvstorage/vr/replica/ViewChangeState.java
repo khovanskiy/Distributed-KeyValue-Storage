@@ -1,6 +1,8 @@
-package com.khovanskiy.dkvstorage.vr;
+package com.khovanskiy.dkvstorage.vr.replica;
 
 
+import com.khovanskiy.dkvstorage.vr.ReplicaStatus;
+import com.khovanskiy.dkvstorage.vr.Utils;
 import com.khovanskiy.dkvstorage.vr.message.DoViewChangeMessage;
 import com.khovanskiy.dkvstorage.vr.message.StartViewChangeMessage;
 import com.khovanskiy.dkvstorage.vr.message.StartViewMessage;

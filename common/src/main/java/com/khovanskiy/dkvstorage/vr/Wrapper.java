@@ -7,6 +7,7 @@ import com.khovanskiy.dkvstorage.vr.operation.DeleteOperation;
 import com.khovanskiy.dkvstorage.vr.operation.GetOperation;
 import com.khovanskiy.dkvstorage.vr.operation.Operation;
 import com.khovanskiy.dkvstorage.vr.operation.SetOperation;
+import com.khovanskiy.dkvstorage.vr.replica.Replica;
 
 import java.io.IOException;
 import java.util.*;
@@ -15,9 +16,11 @@ import java.util.concurrent.Executors;
 
 public class Wrapper {
     private final Replica currentReplica;
+    private final Map<Integer, Map<Integer, Client>> connectionClients = new HashMap<>();
+    private int nextClientId = 0;
     private final Map<Integer, Integer> replicaToConnection = new HashMap<>();
     private final Map<Long, Client> requestToClient = new HashMap<>();
-    private final Map<Integer, Client> clients = new HashMap<>();
+    private final Map<Integer, Client> connectionToClient = new HashMap<>();
     private final ExecutorService backgroundExecutor = Executors.newCachedThreadPool();
     private final Looper looper = new Looper();
     private final Timer timer = new Timer();
@@ -95,8 +98,8 @@ public class Wrapper {
         network.start();
         backgroundExecutor.submit(looper);
 
-        // TODO
-        // timer.scheduleAtFixedRate(timerTask, 0, timeout / 2);
+        // TODO make more smart solution
+        //timer.scheduleAtFixedRate(timerTask, 0, timeout / 2);
     }
 
     public void stop() throws IOException {
@@ -112,11 +115,15 @@ public class Wrapper {
         sendToReplica(currentReplica.getPrimaryNumber(), message);
     }
 
-    public void sendToClient(int clientId, ReplyMessage reply) {
+    /*public void sendToClient(int clientId, ReplyMessage reply) {
         sendToClient(getClient(clientId), reply);
-    }
+    }*/
 
     public void forwardReply(ReplyMessage reply) {
+        Client client = requestToClient.get(reply.getRequestNumber());
+        if (client == null) {
+
+        }
         sendToClient(requestToClient.get(reply.getRequestNumber()), reply);
     }
 
@@ -150,59 +157,71 @@ public class Wrapper {
     }
 
     private void onTimerTick() {
-        if (currentTimerTicks % 2 == 0) {
-            Map<Integer, Replica> newNodes = new HashMap<>(replicas.size());
-            for (Map.Entry<Integer, Replica> entry : replicas.entrySet()) {
-                int connectionId = entry.getKey();
-                Replica replica = entry.getValue();
-                if (Math.abs(currentTimerTicks - replica.getLastTick()) > 1) {
-                    Utils.log(currentReplica.getReplicaNumber(), "Force disconnect from " + network.dump(connectionId));
-                    network.disconnect(connectionId);
+        // TODO: uncomment this if it really needed by DKVS task
 
-                    int newConnectionId = network.connect(replica.getHost(), replica.getPort(), true);
+        /*long currentTimestamp = System.currentTimeMillis();
+        Map<Integer, Replica> newNodes = new HashMap<>(replicas.size());
+        for (Map.Entry<Integer, Replica> entry : replicas.entrySet()) {
+            int connectionId = entry.getKey();
+            Replica replica = entry.getValue();
+            if (Math.abs(currentTimestamp - replica.getLastTimestamp()) > timeout) {
+                Utils.log(currentReplica.getReplicaNumber(), "Force disconnect from " + network.dump(connectionId));
+                network.disconnect(connectionId);
 
-                    newNodes.put(newConnectionId, replica);
-                    replicaToConnection.put(replica.getReplicaNumber(), newConnectionId);
-                } else {
-                    newNodes.put(connectionId, replica);
-                }
+                int newConnectionId = network.connect(replica.getHost(), replica.getPort(), true);
+
+                newNodes.put(newConnectionId, replica);
+                replicaToConnection.put(replica.getReplicaNumber(), newConnectionId);
+            } else {
+                newNodes.put(connectionId, replica);
             }
-            replicas = newNodes;
         }
+        replicas = newNodes;
+        sendToOtherReplicas("ping");/**/
 
-        sendToOtherReplicas("ping");
-        ++currentTimerTicks;
+        currentReplica.onReceivedTimeout();
     }
 
     private void onConnected(int connectionId) {
         Utils.log(currentReplica.getReplicaNumber(), "Connected to remote " + network.dump(connectionId));
         sendToConnection(connectionId, "node " + currentReplica.getReplicaNumber());
         Replica replica = replicas.get(connectionId);
-        replica.setLastTick(currentTimerTicks);
+        replica.setLastTimestamp(System.currentTimeMillis());
     }
 
     private void onDisconnected(int connectionId) {
-        System.out.println("Disconnected " + network.dump(connectionId));
+        Utils.log(currentReplica.getReplicaNumber(), "Disconnected " + network.dump(connectionId));
         Replica replica = replicas.get(connectionId);
         if (replica != null) {
             if (currentReplica.getPrimaryNumber() == replica.getReplicaNumber()) {
                 currentReplica.onPrimaryDisconnected();
             }
+        } else {
+
         }
     }
 
     private void onAccepted(int connectionId) {
         Utils.log(currentReplica.getReplicaNumber(), "Accepted " + network.dump(connectionId));
-        //incoming.add(connectionId);
     }
 
     private void onReceived(int connectionId, String line) {
         Utils.log(currentReplica.getReplicaNumber(), "Received from " + network.dump(connectionId) + ": " + line);
+        Replica replica = replicas.get(connectionId);
+        if (replica != null) {
+            replica.setLastTimestamp(System.currentTimeMillis());
+        }
         try {
             if (processMessage(connectionId, line)) {
                 return;
             }
             Message message = Message.decode(line);
+            // TODO: replace workaround
+            if (message.getMessageType().equals(RequestMessage.TYPE)) {
+                Client client = getClient(connectionId);
+                client.setConnectionId(connectionId);
+                requestToClient.put(((RequestMessage)message).getRequestNumber(), client);
+            }
             message.delegateProcessing(currentReplica);
         } catch (Exception e) {
             System.out.println("Parse error + " + line);
@@ -212,8 +231,9 @@ public class Wrapper {
 
     private boolean processMessage(int connectionId, String line) {
         String[] slices = line.trim().toLowerCase(Locale.US).split(" +");
-        if (slices.length == 0)
+        if (slices.length == 0) {
             return false;
+        }
         switch (slices[0]) {
             case "node": {
                 if (slices.length != 2) {
@@ -264,56 +284,70 @@ public class Wrapper {
     }
 
     private void processNode(int connectionId, int clientId) {
-        Client client = getClient(clientId);
-        if (client.hasConnectionId()) {
+        Client client = getClient(connectionId);
+        /*if (client.hasConnectionId()) {
             int oldConnectionId = client.getConnectionId();
             network.disconnect(oldConnectionId);
-        }
-        client.setConnectionId(connectionId);
+        }*/
         client.markAsReplica();
         sendToConnection(connectionId, "ACCEPTED");
     }
 
     private void processClientRequest(Operation operation, int connectionId) {
+        /*Map<Integer, Client> clients = connectionClients.get(connectionId);
+        if (clients == null) {
+            clients = new HashMap<>();
+            connectionClients.put(connectionId, clients);
+        }*/
+
         Client client = getClient(connectionId);
         client.setConnectionId(connectionId);
+
+        ++requestNumber;
+        RequestMessage request = new RequestMessage(operation, currentReplica.getReplicaNumber(), requestNumber);
+
+        requestToClient.put(requestNumber, client);
+
+        if (currentReplica.isPrimary()) {
+            currentReplica.onReceivedRequest(request);
+        } else {
+            sendToPrimary(request);
+        }
+
+        // TODO: How assign clients' ids?
+        /*Client client = getClient(connectionId);
         if (currentReplica.isPrimary()) {
             RequestMessage request = client.nextRequest(operation);
             currentReplica.onReceivedRequest(request);
         } else {
             ++requestNumber;
             RequestMessage request = new RequestMessage(operation, currentReplica.getReplicaNumber(), requestNumber);
-            sendToPrimary(request);
             requestToClient.put(requestNumber, client);
-        }
+            sendToPrimary(request);
+        }*/
     }
 
     private void processPing(int connectionId) {
-        /*if (currentReplica.getReplicaNumber() == 1) {
-            if (currentTimerTicks > 3 && currentTimerTicks < 10 || currentTimerTicks > 30 && currentTimerTicks < 50){
-                return;
-            }
-        }*/
         sendToConnection(connectionId, "pong");
     }
 
     private void processPong(int connectionId) {
         Replica replica = replicas.get(connectionId);
         if (replica != null) {
-            replica.setLastTick(currentTimerTicks);
+            replica.setLastTimestamp(currentTimerTicks);
         }
     }
 
     private Client getClient(int clientId) {
-        Client client = clients.get(clientId);
+        Client client = connectionToClient.get(clientId);
         if (client == null) {
             client = new Client(clientId);
-            clients.put(clientId, client);
+            connectionToClient.put(clientId, client);
         }
         return client;
     }
 
-    private class Node {
+    /*private class Node {
         private int nodeId;
         private long lastTick;
 
@@ -332,9 +366,13 @@ public class Wrapper {
         public void setLastTick(long lastTick) {
             this.lastTick = lastTick;
         }
-    }
+    }*/
 
     private class Client {
+        public int getClientId() {
+            return clientId;
+        }
+
         private int clientId;
         private int requestNumber;
         private int connectionId;

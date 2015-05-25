@@ -1,7 +1,7 @@
 package com.khovanskiy.dkvstorage.vr.message;
 
-import com.khovanskiy.dkvstorage.vr.Replica;
-import com.khovanskiy.dkvstorage.vr.ReplicaLog;
+import com.khovanskiy.dkvstorage.vr.replica.Replica;
+import com.khovanskiy.dkvstorage.vr.replica.ReplicaLog;
 
 import javax.json.Json;
 import javax.json.JsonObject;

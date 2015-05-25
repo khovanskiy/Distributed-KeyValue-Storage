@@ -1,7 +1,10 @@
-package com.khovanskiy.dkvstorage.vr;
+package com.khovanskiy.dkvstorage.vr.replica;
 
+import com.khovanskiy.dkvstorage.vr.ReplicaStatus;
+import com.khovanskiy.dkvstorage.vr.Utils;
 import com.khovanskiy.dkvstorage.vr.message.RecoveryMessage;
 import com.khovanskiy.dkvstorage.vr.message.RecoveryResponseMessage;
+import com.khovanskiy.dkvstorage.vr.replica.Replica;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +35,12 @@ public class RecoveryState {
         }
     }
 
-    public void processRecoveryMessage(RecoveryMessage message) {
+    /**
+     * Handles RECOVERY message
+     *
+     * @param message RECOVERY message
+     */
+    public void handleRecoveryMessage(RecoveryMessage message) {
         // replica replies to a RECOVERY message only when its status is normal
         if (replica.getStatus() != ReplicaStatus.NORMAL) {
             return;
@@ -48,7 +56,12 @@ public class RecoveryState {
         }
     }
 
-    public void processRecoveryResponseMessage(RecoveryResponseMessage message) {
+    /**
+     * Handles RECOVERY_RESPONSE message
+     *
+     * @param message RECOVERY_RESPONSE message
+     */
+    public void handleRecoveryResponseMessage(RecoveryResponseMessage message) {
         if (replica.getStatus() != ReplicaStatus.RECOVERING) {
             return;
         }

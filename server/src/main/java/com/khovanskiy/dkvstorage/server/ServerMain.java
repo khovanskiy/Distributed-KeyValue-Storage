@@ -1,6 +1,6 @@
 package com.khovanskiy.dkvstorage.server;
 
-import com.khovanskiy.dkvstorage.vr.Replica;
+import com.khovanskiy.dkvstorage.vr.replica.Replica;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -76,7 +76,7 @@ public class ServerMain {
                         if (slices[0].equals("kill")) {
                             int replicaId = Integer.parseInt(slices[1]);
                             replicas.get(replicaId).stop();
-                        } else if (slices[0].equals("start")) {
+                        } else if (slices[0].equals("start") || slices[0].equals("dkvs_node")) {
                             int replicaId = Integer.parseInt(slices[1]);
                             replicas.get(replicaId).start(timeout, configuration);
                         }

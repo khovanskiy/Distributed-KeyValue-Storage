@@ -1,13 +1,10 @@
 package com.khovanskiy.dkvstorage.vr.operation;
 
-import com.khovanskiy.dkvstorage.vr.Replica;
-import com.khovanskiy.dkvstorage.vr.message.ReplyMessage;
+import com.khovanskiy.dkvstorage.vr.replica.Replica;
 
 import javax.json.Json;
 import javax.json.JsonObject;
-import javax.json.JsonReader;
 import javax.json.JsonString;
-import java.io.StringReader;
 
 /**
  * @author Victor Khovanskiy

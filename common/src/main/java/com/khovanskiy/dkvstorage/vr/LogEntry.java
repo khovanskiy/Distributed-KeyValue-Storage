@@ -4,6 +4,8 @@ import com.khovanskiy.dkvstorage.vr.message.RequestMessage;
 
 /**
  * @author Victor Khovanskiy
+ *
+ * @deprecated
  */
 public class LogEntry {
 
