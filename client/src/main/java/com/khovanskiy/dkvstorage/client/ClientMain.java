@@ -19,13 +19,13 @@ import java.text.ParseException;
 public class ClientMain {
 
     public static void main(String[] args) throws IOException {
-        new ClientMain().execute();
+        new ClientMain().execute(args);
     }
 
-    private void execute() throws IOException {
+    private void execute(String[] args) throws IOException {
         Network network = new Network();
 
-        int serverConnection = network.connect("localhost", 555, true);
+        int serverConnection = network.connect("localhost", Integer.parseInt(args[0]), true);
         network.setConnectionListener(new Network.ConnectionListener() {
             @Override
             public void onConnected(int connectionId) {
